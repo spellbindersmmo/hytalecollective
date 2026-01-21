@@ -4,7 +4,11 @@
       "Bash(npm create:*)",
       "Bash(npm init -y)",
       "Bash(npm install:*)",
-      "Bash(copy:*)"
+      "Bash(copy:*)",
+      "WebSearch",
+      "WebFetch(domain:hytale.game)",
+      "WebFetch(domain:hytalemodding.dev)",
+      "WebFetch(domain:www.curseforge.com)"
     ]
   }
 }
