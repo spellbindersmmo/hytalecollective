@@ -1,7 +1,9 @@
 <script>
   import Button from './Button.svelte'
+  import AuthModal from './AuthModal.svelte'
+  import { auth } from './stores/auth.svelte.js'
 
-  let { currentPage = 'home' } = $props()
+  let { currentPage = 'home', onnavigate = () => {} } = $props()
 
   const navItems = [
     { id: 'home', label: 'Home', href: '/' },
@@ -12,13 +14,35 @@
   ]
 
   let mobileMenuOpen = $state(false)
+  let authModalOpen = $state(false)
+  let userMenuOpen = $state(false)
+
+  function openAuthModal() {
+    authModalOpen = true
+    mobileMenuOpen = false
+  }
+
+  function toggleUserMenu() {
+    userMenuOpen = !userMenuOpen
+  }
+
+  function closeUserMenu() {
+    userMenuOpen = false
+  }
+
+  async function handleSignOut() {
+    await auth.signOut()
+    userMenuOpen = false
+    mobileMenuOpen = false
+    onnavigate('home')
+  }
 </script>
 
 <nav class="navbar">
   <div class="navbar-bg"></div>
   <div class="navbar-inner">
     <!-- Logo with crest design -->
-    <a href="/" class="logo">
+    <a href="/" class="logo" onclick={(e) => { e.preventDefault(); onnavigate('home'); }}>
       <div class="logo-crest">
         <svg viewBox="0 0 40 44" class="crest-svg">
           <defs>
@@ -55,16 +79,83 @@
           href={item.href}
           class="nav-link"
           class:active={currentPage === item.id}
+          onclick={(e) => { e.preventDefault(); onnavigate(item.id); }}
         >
           {item.label}
         </a>
       {/each}
     </div>
 
+    <!-- Upload Button -->
+    {#if auth.isAuthenticated}
+      <button class="upload-btn" onclick={() => onnavigate('upload')}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        <span>Upload</span>
+      </button>
+    {/if}
+
     <!-- Auth Buttons -->
     <div class="nav-auth">
-      <Button variant="ghost">Log In</Button>
-      <Button variant="primary">Sign Up</Button>
+      {#if auth.isAuthenticated}
+        <div class="user-menu-container">
+          <button class="user-menu-btn" onclick={toggleUserMenu}>
+            {#if auth.profile?.avatar_url}
+              <img src={auth.profile.avatar_url} alt="" class="user-avatar" />
+            {:else}
+              <div class="user-avatar-placeholder">
+                {auth.profile?.username?.charAt(0).toUpperCase() || '?'}
+              </div>
+            {/if}
+            <span class="user-name">{auth.profile?.username || 'User'}</span>
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+
+          {#if userMenuOpen}
+            <div class="user-dropdown">
+              <a href="/profile" class="dropdown-item" onclick={(e) => { e.preventDefault(); closeUserMenu(); onnavigate(`profile-${auth.profile?.username}`); }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                Profile
+              </a>
+              <a href="/my-uploads" class="dropdown-item" onclick={(e) => { e.preventDefault(); closeUserMenu(); onnavigate('upload'); }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                My Uploads
+              </a>
+              <a href="/settings" class="dropdown-item" onclick={(e) => { e.preventDefault(); closeUserMenu(); onnavigate('settings'); }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+                Settings
+              </a>
+              <div class="dropdown-divider"></div>
+              <button class="dropdown-item logout" onclick={handleSignOut}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          {/if}
+        </div>
+      {:else}
+        <Button variant="ghost" onclick={openAuthModal}>Log In</Button>
+        <Button variant="primary" onclick={openAuthModal}>Sign Up</Button>
+      {/if}
     </div>
 
     <!-- Mobile Menu Button -->
@@ -90,19 +181,36 @@
           href={item.href}
           class="mobile-link"
           class:active={currentPage === item.id}
+          onclick={(e) => { e.preventDefault(); mobileMenuOpen = false; onnavigate(item.id); }}
         >
           {item.label}
         </a>
       {/each}
       <div class="mobile-auth">
-        <Button variant="ghost">Log In</Button>
-        <Button variant="primary">Sign Up</Button>
+        {#if auth.isAuthenticated}
+          <a href="/upload" class="mobile-link upload" onclick={(e) => { e.preventDefault(); mobileMenuOpen = false; onnavigate('upload'); }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Upload
+          </a>
+          <a href="/profile" class="mobile-link" onclick={(e) => { e.preventDefault(); mobileMenuOpen = false; onnavigate(`profile-${auth.profile?.username}`); }}>Profile</a>
+          <a href="/settings" class="mobile-link" onclick={(e) => { e.preventDefault(); mobileMenuOpen = false; onnavigate('settings'); }}>Settings</a>
+          <button class="mobile-link logout" onclick={handleSignOut}>Sign Out</button>
+        {:else}
+          <Button variant="ghost" onclick={openAuthModal}>Log In</Button>
+          <Button variant="primary" onclick={openAuthModal}>Sign Up</Button>
+        {/if}
       </div>
     </div>
   {/if}
 
   <div class="navbar-border"></div>
 </nav>
+
+<AuthModal bind:open={authModalOpen} onclose={() => authModalOpen = false} />
 
 <style>
   .navbar {
@@ -325,15 +433,196 @@
   .mobile-auth {
     position: relative;
     display: flex;
-    gap: 0.75rem;
+    flex-direction: column;
+    gap: 0.5rem;
     margin-top: 1rem;
     padding-top: 1rem;
     border-top: 1px solid #3d3428;
   }
 
+  .mobile-auth .logout {
+    color: #c46b6b;
+    background: none;
+    border: none;
+    text-align: left;
+  }
+
+  .mobile-link.upload {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #d4a44c;
+    background: rgba(212, 164, 76, 0.1);
+  }
+
+  .mobile-link.upload svg {
+    width: 18px;
+    height: 18px;
+  }
+
   @media (max-width: 640px) {
     .logo-text {
       display: none;
+    }
+  }
+
+  /* User Menu Styles */
+  .user-menu-container {
+    position: relative;
+  }
+
+  .user-menu-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    background: rgba(60, 50, 40, 0.4);
+    border: 1px solid #4a3f32;
+    border-radius: 6px;
+    color: #c4b8a4;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .user-menu-btn:hover {
+    background: rgba(60, 50, 40, 0.6);
+    border-color: #6b5a48;
+    color: #f0e6d8;
+  }
+
+  .user-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  .user-avatar-placeholder {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #d4a44c 0%, #a67c28 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #1a1208;
+  }
+
+  .user-name {
+    font-size: 0.85rem;
+    font-weight: 500;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chevron {
+    width: 16px;
+    height: 16px;
+    opacity: 0.6;
+  }
+
+  .user-dropdown {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    min-width: 180px;
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(70, 58, 42, 0.4) 0%, transparent 50%),
+      linear-gradient(180deg, #2a241c 0%, #1e1a15 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 8px;
+    padding: 0.5rem;
+    box-shadow:
+      0 0 0 1px rgba(107, 90, 72, 0.2),
+      0 10px 25px rgba(0, 0, 0, 0.4);
+    z-index: 200;
+  }
+
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.85rem;
+    color: #c4b8a4;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .dropdown-item:hover {
+    background: rgba(60, 50, 40, 0.5);
+    color: #f0e6d8;
+  }
+
+  .dropdown-item svg {
+    width: 18px;
+    height: 18px;
+    opacity: 0.7;
+  }
+
+  .dropdown-item.logout {
+    color: #c46b6b;
+  }
+
+  .dropdown-item.logout:hover {
+    background: rgba(196, 107, 107, 0.15);
+    color: #e8a0a0;
+  }
+
+  .dropdown-divider {
+    height: 1px;
+    background: #3d3428;
+    margin: 0.5rem 0;
+  }
+
+  /* Upload Button */
+  .upload-btn {
+    display: none;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    font-family: 'Cinzel', serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #1a1208;
+    background: linear-gradient(180deg, #e8c36b 0%, #c49a3a 50%, #a67c28 100%);
+    border: 2px solid #8b6914;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.2);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.3),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+      0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  .upload-btn:hover {
+    background: linear-gradient(180deg, #f0d080 0%, #d4a844 50%, #b88830 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.4),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+      0 2px 8px rgba(212, 164, 76, 0.4);
+  }
+
+  .upload-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  @media (min-width: 768px) {
+    .upload-btn {
+      display: flex;
     }
   }
 </style>

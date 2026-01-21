@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte'
   import Navbar from './lib/Navbar.svelte'
   import Hero from './lib/Hero.svelte'
   import Footer from './lib/Footer.svelte'
@@ -7,165 +8,102 @@
   import BuildCard from './lib/BuildCard.svelte'
   import ServerCard from './lib/ServerCard.svelte'
   import ForumPost from './lib/ForumPost.svelte'
+  import UploadPage from './lib/UploadPage.svelte'
+  import ForumPage from './lib/ForumPage.svelte'
+  import ForumCategoryPage from './lib/ForumCategoryPage.svelte'
+  import ForumPostPage from './lib/ForumPostPage.svelte'
+  import NewPostPage from './lib/NewPostPage.svelte'
+  import ProfilePage from './lib/ProfilePage.svelte'
+  import SettingsPage from './lib/SettingsPage.svelte'
+  import { auth } from './lib/stores/auth.svelte.js'
+  import {
+    fetchFeaturedBuilds,
+    fetchFeaturedWorlds,
+    fetchFeaturedServers,
+    fetchRecentPosts
+  } from './lib/stores/data.svelte.js'
 
-  // Sample data for featured builds
-  const featuredBuilds = [
-    {
-      title: 'Medieval Castle Keep',
-      author: 'DragonBuilder',
-      thumbnail: '',
-      tags: ['Medieval', 'Castle'],
-      downloads: 3420,
-      blocks: 15600
-    },
-    {
-      title: 'Elven Treehouse Village',
-      author: 'NatureCrafter',
-      thumbnail: '',
-      tags: ['Fantasy', 'Village'],
-      downloads: 2890,
-      blocks: 8900
-    },
-    {
-      title: 'Steampunk Airship',
-      author: 'GearMaster',
-      thumbnail: '',
-      tags: ['Steampunk', 'Vehicle'],
-      downloads: 4100,
-      blocks: 12300
-    },
-    {
-      title: 'Ancient Temple Ruins',
-      author: 'HistoryBuff',
-      thumbnail: '',
-      tags: ['Ancient', 'Ruins'],
-      downloads: 1850,
-      blocks: 7200
-    }
-  ]
+  // Simple page routing
+  let currentPage = $state('home')
 
-  // Sample data for featured worlds
-  const featuredWorlds = [
-    {
-      title: 'Emerald Isles',
-      author: 'WorldForge',
-      thumbnail: '',
-      tags: ['Adventure', 'Islands'],
-      downloads: 8920,
-      blocks: 0
-    },
-    {
-      title: 'Frozen Wastelands',
-      author: 'IceCrafter',
-      thumbnail: '',
-      tags: ['Survival', 'Winter'],
-      downloads: 5640,
-      blocks: 0
-    },
-    {
-      title: 'Desert Kingdoms',
-      author: 'SandMaster',
-      thumbnail: '',
-      tags: ['RPG', 'Desert'],
-      downloads: 7230,
-      blocks: 0
-    },
-    {
-      title: 'Mystic Forests',
-      author: 'EnchantedOne',
-      thumbnail: '',
-      tags: ['Exploration', 'Magic'],
-      downloads: 6100,
-      blocks: 0
+  // Parse route parameters from page string
+  function getRouteParam(page, prefix) {
+    if (page.startsWith(prefix)) {
+      return page.slice(prefix.length)
     }
-  ]
+    return null
+  }
 
-  // Sample data for servers
-  const featuredServers = [
-    {
-      name: 'Hytale Realms',
-      description: 'The largest community server with survival, creative, and minigames.',
-      players: 847,
-      maxPlayers: 1000,
-      tags: ['Survival', 'Minigames', 'Creative'],
-      online: true
-    },
-    {
-      name: 'PvP Arena',
-      description: 'Competitive PvP server with ranked matches and tournaments.',
-      players: 234,
-      maxPlayers: 500,
-      tags: ['PvP', 'Competitive'],
-      online: true
-    },
-    {
-      name: 'Builder\'s Paradise',
-      description: 'Creative server focused on collaborative building projects.',
-      players: 156,
-      maxPlayers: 200,
-      tags: ['Creative', 'Building'],
-      online: true
-    },
-    {
-      name: 'RPG Adventures',
-      description: 'Custom RPG experience with quests, dungeons, and progression.',
-      players: 0,
-      maxPlayers: 300,
-      tags: ['RPG', 'Adventure'],
-      online: false
-    }
-  ]
+  // Derived route info
+  let forumCategorySlug = $derived(getRouteParam(currentPage, 'forum-category-'))
+  let forumPostSlug = $derived(getRouteParam(currentPage, 'forum-post-'))
+  let newPostCategorySlug = $derived(getRouteParam(currentPage, 'forum-new-post-') || '')
+  let profileUsername = $derived(getRouteParam(currentPage, 'profile-'))
 
-  // Sample data for forum posts
-  const recentPosts = [
-    {
-      title: 'Tips for building realistic medieval structures',
-      author: 'ArchitectPro',
-      category: 'Showcase',
-      replies: 42,
-      views: 1250,
-      lastActivity: '2 hours ago'
-    },
-    {
-      title: 'Best mods for enhanced gameplay?',
-      author: 'ModEnthusiast',
-      category: 'Help',
-      replies: 28,
-      views: 890,
-      lastActivity: '4 hours ago'
-    },
-    {
-      title: 'Weekly building challenge: Fantasy Tavern',
-      author: 'CommunityMod',
-      category: 'News',
-      replies: 67,
-      views: 2100,
-      lastActivity: '1 hour ago'
-    },
-    {
-      title: 'What features are you most excited about?',
-      author: 'HytaleFan2024',
-      category: 'Discussion',
-      replies: 156,
-      views: 4500,
-      lastActivity: '30 mins ago'
-    },
-    {
-      title: 'Server hosting recommendations',
-      author: 'AdminHelper',
-      category: 'Help',
-      replies: 19,
-      views: 620,
-      lastActivity: '6 hours ago'
+  // Data fetched from Supabase
+  let featuredBuilds = $state([])
+  let featuredWorlds = $state([])
+  let featuredServers = $state([])
+  let recentPosts = $state([])
+  let loading = $state(true)
+  let error = $state(null)
+
+  function navigate(page) {
+    currentPage = page
+    window.scrollTo(0, 0)
+  }
+
+  // Expose navigate globally for components
+  if (typeof window !== 'undefined') {
+    window.navigate = navigate
+  }
+
+  onMount(async () => {
+    // Initialize auth
+    await auth.initialize()
+
+    // Fetch all featured content in parallel
+    try {
+      const [builds, worlds, servers, posts] = await Promise.all([
+        fetchFeaturedBuilds(4).catch(() => []),
+        fetchFeaturedWorlds(4).catch(() => []),
+        fetchFeaturedServers(4).catch(() => []),
+        fetchRecentPosts(5).catch(() => [])
+      ])
+
+      featuredBuilds = builds
+      featuredWorlds = worlds
+      featuredServers = servers
+      recentPosts = posts
+    } catch (e) {
+      console.error('Error fetching data:', e)
+      error = e.message
+    } finally {
+      loading = false
     }
-  ]
+  })
 </script>
 
+{#if currentPage === 'upload'}
+  <UploadPage onnavigate={navigate} />
+{:else if currentPage === 'forum'}
+  <ForumPage onnavigate={navigate} />
+{:else if forumCategorySlug}
+  <ForumCategoryPage categorySlug={forumCategorySlug} onnavigate={navigate} />
+{:else if forumPostSlug}
+  <ForumPostPage postSlug={forumPostSlug} onnavigate={navigate} />
+{:else if currentPage === 'forum-new-post' || currentPage.startsWith('forum-new-post-')}
+  <NewPostPage categorySlug={newPostCategorySlug} onnavigate={navigate} />
+{:else if profileUsername}
+  <ProfilePage username={profileUsername} onnavigate={navigate} />
+{:else if currentPage === 'settings'}
+  <SettingsPage onnavigate={navigate} />
+{:else}
 <div class="app">
-  <Navbar currentPage="home" />
+  <Navbar currentPage="home" onnavigate={navigate} />
 
   <main>
-    <Hero />
+    <Hero onnavigate={navigate} />
 
     <!-- Featured Builds Section -->
     <section class="section">
@@ -232,7 +170,7 @@
             <h2 class="section-title">Community Forum</h2>
             <p class="section-subtitle">Join the conversation</p>
           </div>
-          <Button variant="secondary" href="/forum">Visit Forum</Button>
+          <Button variant="secondary" onclick={() => navigate('forum')}>Visit Forum</Button>
         </div>
 
         <Panel>
@@ -269,6 +207,7 @@
 
   <Footer />
 </div>
+{/if}
 
 <style>
   .app {
