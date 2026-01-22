@@ -122,6 +122,7 @@ export const auth = {
   get profile() { return profile },
   get loading() { return loading },
   get isAuthenticated() { return !!user },
+  get isAdmin() { return profile?.role === 'admin' || profile?.is_admin === true },
 
   initialize,
   fetchProfile,

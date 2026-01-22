@@ -1,5 +1,4 @@
 <script>
-  import { onMount } from 'svelte'
   import Navbar from './Navbar.svelte'
   import Footer from './Footer.svelte'
   import Panel from './Panel.svelte'
@@ -25,8 +24,12 @@
     partner: { label: 'Partner', color: '#9b6dc6' }
   }
 
-  onMount(async () => {
-    await loadServer()
+  // Use $effect to react to serverSlug prop changes
+  // This runs on mount AND whenever serverSlug changes
+  $effect(() => {
+    if (serverSlug) {
+      loadServer()
+    }
   })
 
   async function loadServer() {
