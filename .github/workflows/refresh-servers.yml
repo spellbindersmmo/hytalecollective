@@ -21,8 +21,14 @@ jobs:
       - name: Install dependencies
         run: npm install @supabase/supabase-js
 
-      - name: Run scraper
+      - name: Run scraper (external servers)
         env:
           VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-servers.js
+
+      - name: Check community server status
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/check-server-status.js
