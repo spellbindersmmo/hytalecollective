@@ -1,8 +1,8 @@
 // Multi-protocol server query system
 // Supports HyQuery, Minecraft SLP, Source A2S, and raw connectivity
 
-const dgram = require('dgram');
-const net = require('net');
+import dgram from 'dgram';
+import net from 'net';
 
 const DEFAULT_TIMEOUT = 400; // ms per protocol
 
@@ -20,7 +20,7 @@ const DEFAULT_TIMEOUT = 400; // ms per protocol
  * Create an empty/offline result
  * @returns {QueryResult}
  */
-function offlineResult() {
+export function offlineResult() {
   return {
     online: false,
     protocol: null,
@@ -34,7 +34,7 @@ function offlineResult() {
  * Create a connectivity-only result
  * @returns {QueryResult}
  */
-function connectivityResult() {
+export function connectivityResult() {
   return {
     online: true,
     protocol: 'connectivity',
@@ -54,7 +54,7 @@ function connectivityResult() {
  * Request: Magic bytes + query type
  * Response: JSON or binary data with server info
  */
-async function queryHyQuery(host, port, timeout = DEFAULT_TIMEOUT) {
+export async function queryHyQuery(host, port, timeout = DEFAULT_TIMEOUT) {
   return new Promise((resolve) => {
     const socket = dgram.createSocket('udp4');
     const timer = setTimeout(() => {
@@ -165,7 +165,7 @@ async function queryHyQuery(host, port, timeout = DEFAULT_TIMEOUT) {
  * Query server using Minecraft Server List Ping protocol
  * Used by many game servers for compatibility
  */
-async function queryMinecraftSLP(host, port, timeout = DEFAULT_TIMEOUT) {
+export async function queryMinecraftSLP(host, port, timeout = DEFAULT_TIMEOUT) {
   return new Promise((resolve) => {
     const socket = new net.Socket();
     let buffer = Buffer.alloc(0);
@@ -276,7 +276,7 @@ async function queryMinecraftSLP(host, port, timeout = DEFAULT_TIMEOUT) {
  * Query server using Source Engine A2S_INFO protocol
  * Common in many game servers
  */
-async function querySourceA2S(host, port, timeout = DEFAULT_TIMEOUT) {
+export async function querySourceA2S(host, port, timeout = DEFAULT_TIMEOUT) {
   return new Promise((resolve) => {
     const socket = dgram.createSocket('udp4');
 
@@ -393,7 +393,7 @@ async function querySourceA2S(host, port, timeout = DEFAULT_TIMEOUT) {
  * Simple TCP connectivity check
  * Last resort - only determines online/offline
  */
-async function checkTCPConnectivity(host, port, timeout = DEFAULT_TIMEOUT) {
+export async function checkTCPConnectivity(host, port, timeout = DEFAULT_TIMEOUT) {
   return new Promise((resolve) => {
     const socket = new net.Socket();
 
@@ -422,7 +422,7 @@ async function checkTCPConnectivity(host, port, timeout = DEFAULT_TIMEOUT) {
  * Simple UDP connectivity check
  * Sends a packet and waits for any response
  */
-async function checkUDPConnectivity(host, port, timeout = DEFAULT_TIMEOUT) {
+export async function checkUDPConnectivity(host, port, timeout = DEFAULT_TIMEOUT) {
   return new Promise((resolve) => {
     const socket = dgram.createSocket('udp4');
 
@@ -475,7 +475,7 @@ const PROTOCOL_HANDLERS = [
  * @param {number} timeout - Timeout per protocol in ms
  * @returns {Promise<QueryResult>}
  */
-async function queryServer(host, port = 25565, timeout = DEFAULT_TIMEOUT) {
+export async function queryServer(host, port = 25565, timeout = DEFAULT_TIMEOUT) {
   // Clean the host
   const cleanHost = host.replace(/^https?:\/\//, '').split('/')[0];
 
@@ -514,7 +514,7 @@ async function queryServer(host, port = 25565, timeout = DEFAULT_TIMEOUT) {
  * @param {number} timeout - Timeout per protocol
  * @returns {Promise<Map<string, QueryResult>>}
  */
-async function queryServers(servers, concurrency = 10, timeout = DEFAULT_TIMEOUT) {
+export async function queryServers(servers, concurrency = 10, timeout = DEFAULT_TIMEOUT) {
   const results = new Map();
   const queue = [...servers];
 
@@ -538,15 +538,3 @@ async function queryServers(servers, concurrency = 10, timeout = DEFAULT_TIMEOUT
   await Promise.all(workers);
   return results;
 }
-
-module.exports = {
-  queryServer,
-  queryServers,
-  queryHyQuery,
-  queryMinecraftSLP,
-  querySourceA2S,
-  checkTCPConnectivity,
-  checkUDPConnectivity,
-  offlineResult,
-  connectivityResult
-};
