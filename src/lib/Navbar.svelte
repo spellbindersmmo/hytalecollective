@@ -7,6 +7,7 @@
 
   const navItems = [
     { id: 'home', label: 'Home', href: '/' },
+    { id: 'mods', label: 'Mods', href: '/mods' },
     { id: 'builds', label: 'Builds', href: '/builds' },
     { id: 'worlds', label: 'Worlds', href: '/worlds' },
     { id: 'servers', label: 'Servers', href: '/servers' },

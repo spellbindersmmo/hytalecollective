@@ -16,6 +16,19 @@
   let submitting = $state(false)
   let error = $state(null)
 
+  // Edit/Delete state
+  let editing = $state(false)
+  let editTitle = $state('')
+  let editContent = $state('')
+  let saving = $state(false)
+  let showDeleteConfirm = $state(false)
+  let deleting = $state(false)
+
+  // Check if current user is the post author
+  const isAuthor = $derived(
+    auth.isAuthenticated && post && auth.user?.id === post.author?.id
+  )
+
   onMount(() => {
     loadPost()
   })
@@ -111,6 +124,79 @@
       month: 'short'
     })
   }
+
+  // Edit functions
+  function startEditing() {
+    editTitle = post.title
+    editContent = post.content
+    editing = true
+  }
+
+  function cancelEditing() {
+    editing = false
+    editTitle = ''
+    editContent = ''
+  }
+
+  async function saveEdit() {
+    if (!editTitle.trim() || !editContent.trim()) return
+
+    saving = true
+    error = null
+
+    try {
+      const { error: updateError } = await supabase
+        .from('forum_posts')
+        .update({
+          title: editTitle.trim(),
+          content: editContent.trim(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', post.id)
+
+      if (updateError) throw updateError
+
+      // Update local state
+      post.title = editTitle.trim()
+      post.content = editContent.trim()
+      editing = false
+    } catch (e) {
+      error = e.message
+    } finally {
+      saving = false
+    }
+  }
+
+  // Delete functions
+  function confirmDelete() {
+    showDeleteConfirm = true
+  }
+
+  function cancelDelete() {
+    showDeleteConfirm = false
+  }
+
+  async function deletePost() {
+    deleting = true
+    error = null
+
+    try {
+      const { error: deleteError } = await supabase
+        .from('forum_posts')
+        .delete()
+        .eq('id', post.id)
+
+      if (deleteError) throw deleteError
+
+      // Navigate back to the category
+      onnavigate(`forum-category-${post.category.slug}`)
+    } catch (e) {
+      error = e.message
+      showDeleteConfirm = false
+    } finally {
+      deleting = false
+    }
+  }
 </script>
 
 <div class="page">
@@ -146,21 +232,50 @@
         <Panel>
           <article class="post">
             <header class="post-header">
-              <div class="post-meta">
-                <span
-                  class="category-badge"
-                  style="background: {post.category.color}20; color: {post.category.color}; border-color: {post.category.color}40;"
-                >
-                  {post.category.name}
-                </span>
-                {#if post.is_pinned}
-                  <span class="pinned-badge">Pinned</span>
-                {/if}
-                {#if post.is_locked}
-                  <span class="locked-badge">Locked</span>
+              <div class="post-header-top">
+                <div class="post-meta">
+                  <span
+                    class="category-badge"
+                    style="background: {post.category.color}20; color: {post.category.color}; border-color: {post.category.color}40;"
+                  >
+                    {post.category.name}
+                  </span>
+                  {#if post.is_pinned}
+                    <span class="pinned-badge">Pinned</span>
+                  {/if}
+                  {#if post.is_locked}
+                    <span class="locked-badge">Locked</span>
+                  {/if}
+                </div>
+                {#if isAuthor && !editing}
+                  <div class="post-actions">
+                    <button class="action-btn edit-btn" onclick={startEditing} title="Edit post">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                      Edit
+                    </button>
+                    <button class="action-btn delete-btn" onclick={confirmDelete} title="Delete post">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                      Delete
+                    </button>
+                  </div>
                 {/if}
               </div>
-              <h1 class="post-title">{post.title}</h1>
+              {#if editing}
+                <input
+                  type="text"
+                  class="edit-title-input"
+                  bind:value={editTitle}
+                  placeholder="Post title"
+                />
+              {:else}
+                <h1 class="post-title">{post.title}</h1>
+              {/if}
             </header>
 
             <div class="post-body">
@@ -179,16 +294,38 @@
               </aside>
 
               <div class="content-area">
-                <div class="content">
-                  {post.content}
-                </div>
-                <footer class="post-footer">
-                  <span class="timestamp">{formatDate(post.created_at)}</span>
-                  <div class="stats">
-                    <span>{post.view_count} views</span>
-                    <span>{post.reply_count} replies</span>
+                {#if editing}
+                  <div class="edit-form">
+                    <textarea
+                      class="edit-content-input"
+                      bind:value={editContent}
+                      placeholder="Post content"
+                      rows="8"
+                    ></textarea>
+                    {#if error}
+                      <div class="error-message">{error}</div>
+                    {/if}
+                    <div class="edit-actions">
+                      <Button variant="secondary" onclick={cancelEditing} disabled={saving}>
+                        Cancel
+                      </Button>
+                      <Button variant="primary" onclick={saveEdit} disabled={saving || !editTitle.trim() || !editContent.trim()}>
+                        {saving ? 'Saving...' : 'Save Changes'}
+                      </Button>
+                    </div>
                   </div>
-                </footer>
+                {:else}
+                  <div class="content">
+                    {post.content}
+                  </div>
+                  <footer class="post-footer">
+                    <span class="timestamp">{formatDate(post.created_at)}</span>
+                    <div class="stats">
+                      <span>{post.view_count} views</span>
+                      <span>{post.reply_count} replies</span>
+                    </div>
+                  </footer>
+                {/if}
               </div>
             </div>
           </article>
@@ -283,6 +420,34 @@
   <Footer />
 </div>
 
+<!-- Delete Confirmation Modal -->
+{#if showDeleteConfirm}
+  <div class="modal-overlay" onclick={cancelDelete}>
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+        <h3>Delete Post</h3>
+      </div>
+      <p>Are you sure you want to delete this post? This action cannot be undone and will also delete all replies.</p>
+      {#if error}
+        <div class="error-message">{error}</div>
+      {/if}
+      <div class="modal-actions">
+        <Button variant="secondary" onclick={cancelDelete} disabled={deleting}>
+          Cancel
+        </Button>
+        <Button variant="primary" onclick={deletePost} disabled={deleting}>
+          {deleting ? 'Deleting...' : 'Delete Post'}
+        </Button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .page {
     min-height: 100vh;
@@ -351,10 +516,104 @@
     border-bottom: 1px solid #3d3428;
   }
 
+  .post-header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+  }
+
   .post-meta {
     display: flex;
     gap: 0.5rem;
-    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .post-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+    border: 1px solid #4a3f32;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: linear-gradient(180deg, #3a3127 0%, #302820 100%);
+    color: #c4b8a4;
+  }
+
+  .action-btn:hover {
+    border-color: #6b5a48;
+    color: #f0e6d8;
+  }
+
+  .action-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .action-btn.delete-btn:hover {
+    border-color: #c46b6b;
+    color: #e8a0a0;
+  }
+
+  .edit-title-input {
+    width: 100%;
+    padding: 0.75rem;
+    font-family: 'Cinzel', serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #f5d898;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #4a3f32;
+    border-radius: 6px;
+    margin-top: 0.5rem;
+  }
+
+  .edit-title-input:focus {
+    outline: none;
+    border-color: #d4a44c;
+    box-shadow: 0 0 0 3px rgba(212, 164, 76, 0.15);
+  }
+
+  .edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .edit-content-input {
+    width: 100%;
+    padding: 1rem;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    color: #f0e6d8;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #4a3f32;
+    border-radius: 6px;
+    resize: vertical;
+    min-height: 150px;
+    line-height: 1.7;
+  }
+
+  .edit-content-input:focus {
+    outline: none;
+    border-color: #d4a44c;
+    box-shadow: 0 0 0 3px rgba(212, 164, 76, 0.15);
+  }
+
+  .edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
   }
 
   .category-badge {
@@ -624,5 +883,59 @@
 
   .locked-notice p {
     margin: 0;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+  }
+
+  .modal {
+    background: linear-gradient(180deg, #2a241c 0%, #1e1a14 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 8px;
+    padding: 1.5rem;
+    max-width: 400px;
+    width: 100%;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .modal-header svg {
+    width: 24px;
+    height: 24px;
+    color: #c46b6b;
+  }
+
+  .modal-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: #f5d898;
+  }
+
+  .modal p {
+    color: #a89880;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin: 0 0 1.25rem 0;
+  }
+
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
   }
 </style>

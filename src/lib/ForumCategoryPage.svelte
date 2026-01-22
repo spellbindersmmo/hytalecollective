@@ -17,6 +17,18 @@
   let totalPages = $state(1)
   const limit = 20
 
+  // Check if current category is admin-only
+  function isAdminOnlyCategory(cat) {
+    if (!cat) return false
+    const slug = cat.slug?.toLowerCase() || ''
+    return slug.includes('news') || slug.includes('announcement') || cat.admin_only === true
+  }
+
+  // Can the current user post in this category?
+  const canPost = $derived(
+    auth.isAuthenticated && (!isAdminOnlyCategory(category) || auth.isAdmin)
+  )
+
   onMount(() => {
     loadCategory()
   })
@@ -107,7 +119,7 @@
           </h1>
           <p class="page-subtitle">{category?.description || ''}</p>
         </div>
-        {#if auth.isAuthenticated}
+        {#if canPost}
           <Button variant="primary" onclick={() => onnavigate(`forum-new-post-${categorySlug}`)}>
             New Post
           </Button>
@@ -125,7 +137,7 @@
             </svg>
             <h3>No posts yet</h3>
             <p>Be the first to start a discussion in this category!</p>
-            {#if auth.isAuthenticated}
+            {#if canPost}
               <Button variant="primary" onclick={() => onnavigate(`forum-new-post-${categorySlug}`)}>
                 Create Post
               </Button>

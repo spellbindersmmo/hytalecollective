@@ -11,7 +11,7 @@
 
   let { categorySlug = '', onnavigate = () => {} } = $props()
 
-  let categories = $state([])
+  let allCategories = $state([])
   let selectedCategory = $state('')
   let title = $state('')
   let content = $state('')
@@ -20,10 +20,23 @@
   let error = $state(null)
   let showAuthModal = $state(false)
 
+  // Helper to check if a category is admin-only
+  function isAdminOnlyCategory(category) {
+    const slug = category.slug?.toLowerCase() || ''
+    return slug.includes('news') || slug.includes('announcement') || category.admin_only === true
+  }
+
+  // Filter categories based on user role
+  const categories = $derived(
+    auth.isAdmin
+      ? allCategories
+      : allCategories.filter(c => !isAdminOnlyCategory(c))
+  )
+
   onMount(async () => {
     await loadCategories()
 
-    // Pre-select category if provided
+    // Pre-select category if provided (only if user has access)
     if (categorySlug && categories.length > 0) {
       const cat = categories.find(c => c.slug === categorySlug)
       if (cat) {
@@ -42,10 +55,11 @@
         .order('sort_order')
 
       if (catError) throw catError
-      categories = data
+      allCategories = data
 
-      if (data.length > 0 && !selectedCategory) {
-        selectedCategory = data[0].id
+      // Select first available category for this user
+      if (categories.length > 0 && !selectedCategory) {
+        selectedCategory = categories[0].id
       }
     } catch (e) {
       console.error('Error loading categories:', e)
