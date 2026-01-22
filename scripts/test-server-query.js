@@ -2,7 +2,7 @@
 // Usage: node scripts/test-server-query.js <host> [port]
 // Example: node scripts/test-server-query.js play.hyfable.com 25565
 
-const { queryServer, queryHyQuery, queryMinecraftSLP, querySourceA2S } = require('./lib/server-query.js');
+import { queryServer, queryHyQuery, queryMinecraftSLP, querySourceA2S } from './lib/server-query.js';
 
 const host = process.argv[2];
 const port = parseInt(process.argv[3]) || 25565;

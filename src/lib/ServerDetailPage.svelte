@@ -306,21 +306,6 @@
               </Panel>
             {/if}
 
-            {#if server.source_url}
-              <Panel>
-                <div class="source-section">
-                  <h3 class="section-label">Original Listing</h3>
-                  <a href={server.source_url} target="_blank" rel="noopener noreferrer" class="source-link">
-                    View on {server.source}
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                      <polyline points="15 3 21 3 21 9" />
-                      <line x1="10" y1="14" x2="21" y2="3" />
-                    </svg>
-                  </a>
-                </div>
-              </Panel>
-            {/if}
 
             <Panel>
               <div class="stats-section">
@@ -609,7 +594,6 @@
   .owner-section,
   .vote-section,
   .links-section,
-  .source-section,
   .stats-section {
     padding: 0.5rem;
   }
@@ -756,26 +740,6 @@
 
   .link-btn.discord:hover {
     color: #7289DA;
-  }
-
-  /* Source */
-  .source-link {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    color: #8a7a6a;
-    text-decoration: none;
-    font-size: 0.85rem;
-    transition: color 0.15s;
-  }
-
-  .source-link:hover {
-    color: #c4b8a4;
-  }
-
-  .source-link svg {
-    width: 14px;
-    height: 14px;
   }
 
   /* Stats */
