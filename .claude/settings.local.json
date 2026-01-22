@@ -8,7 +8,10 @@
       "WebSearch",
       "WebFetch(domain:hytale.game)",
       "WebFetch(domain:hytalemodding.dev)",
-      "WebFetch(domain:www.curseforge.com)"
+      "WebFetch(domain:www.curseforge.com)",
+      "Bash(dir /B \"C:\\\\Users\\\\owenk\\\\OneDrive\\\\Documents\\\\hytalecollective\\\\src\\\\lib\")",
+      "Bash(supabase --version:*)",
+      "WebFetch(domain:hytaleonlineservers.com)"
     ]
   }
 }

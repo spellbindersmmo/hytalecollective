@@ -15,6 +15,9 @@
   import NewPostPage from './lib/NewPostPage.svelte'
   import ProfilePage from './lib/ProfilePage.svelte'
   import SettingsPage from './lib/SettingsPage.svelte'
+  import ServersPage from './lib/ServersPage.svelte'
+  import AddServerPage from './lib/AddServerPage.svelte'
+  import ServerDetailPage from './lib/ServerDetailPage.svelte'
   import { auth } from './lib/stores/auth.svelte.js'
   import {
     fetchFeaturedBuilds,
@@ -39,6 +42,7 @@
   let forumPostSlug = $derived(getRouteParam(currentPage, 'forum-post-'))
   let newPostCategorySlug = $derived(getRouteParam(currentPage, 'forum-new-post-') || '')
   let profileUsername = $derived(getRouteParam(currentPage, 'profile-'))
+  let serverSlug = $derived(getRouteParam(currentPage, 'server-'))
 
   // Data fetched from Supabase
   let featuredBuilds = $state([])
@@ -98,6 +102,12 @@
   <ProfilePage username={profileUsername} onnavigate={navigate} />
 {:else if currentPage === 'settings'}
   <SettingsPage onnavigate={navigate} />
+{:else if currentPage === 'servers'}
+  <ServersPage onnavigate={navigate} />
+{:else if currentPage === 'servers-add'}
+  <AddServerPage onnavigate={navigate} />
+{:else if serverSlug}
+  <ServerDetailPage serverSlug={serverSlug} onnavigate={navigate} />
 {:else}
 <div class="app">
   <Navbar currentPage="home" onnavigate={navigate} />
@@ -151,12 +161,24 @@
             <h2 class="section-title">Active Servers</h2>
             <p class="section-subtitle">Find a server and start playing</p>
           </div>
-          <Button variant="secondary" href="/servers">View All</Button>
+          <Button variant="secondary" onclick={() => navigate('servers')}>View All</Button>
         </div>
 
         <div class="server-grid">
           {#each featuredServers as server}
-            <ServerCard {...server} />
+            <ServerCard
+              name={server.name}
+              slug={server.slug}
+              description={server.short_description || server.description}
+              players={server.current_players}
+              maxPlayers={server.max_players}
+              tags={server.tags}
+              online={server.status === 'online'}
+              icon={server.icon}
+              banner={server.banner}
+              source={server.source}
+              votes={server.total_votes}
+            />
           {/each}
         </div>
       </div>

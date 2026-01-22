@@ -167,7 +167,7 @@ export async function fetchFeaturedServers(limit = 4) {
   }))
 }
 
-export async function fetchServers({ page = 1, limit = 20, tag = null, status = null, sortBy = 'current_players' }) {
+export async function fetchServers({ page = 1, limit = 20, tag = null, status = null, search = null, source = null, sortBy = 'current_players' }) {
   let query = supabase
     .from('servers')
     .select(`
@@ -176,12 +176,20 @@ export async function fetchServers({ page = 1, limit = 20, tag = null, status = 
       tags:server_tags(tag:tags(name, slug, color))
     `, { count: 'exact' })
 
-  if (status) {
+  if (status && status !== 'all') {
     query = query.eq('status', status)
   }
 
   if (tag) {
     query = query.contains('tags', [{ tag: { slug: tag } }])
+  }
+
+  if (search) {
+    query = query.ilike('name', `%${search}%`)
+  }
+
+  if (source && source !== 'all') {
+    query = query.eq('source', source)
   }
 
   const { data, error, count } = await query
@@ -201,6 +209,133 @@ export async function fetchServers({ page = 1, limit = 20, tag = null, status = 
     page,
     limit
   }
+}
+
+export async function fetchServerBySlug(slug) {
+  const { data, error } = await supabase
+    .from('servers')
+    .select(`
+      *,
+      owner:profiles(id, username, avatar_url, bio),
+      tags:server_tags(tag:tags(name, slug, color))
+    `)
+    .eq('slug', slug)
+    .single()
+
+  if (error) throw error
+
+  // Increment view count
+  await supabase
+    .from('servers')
+    .update({ view_count: data.view_count + 1 })
+    .eq('id', data.id)
+
+  return {
+    ...data,
+    icon: getStorageUrl('servers', data.icon_url),
+    banner: getStorageUrl('servers', data.banner_url),
+    tags: data.tags.map(t => t.tag)
+  }
+}
+
+export async function createServer(serverData) {
+  // Generate slug from name
+  const slug = serverData.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    + '-' + Date.now().toString(36)
+
+  const { data, error } = await supabase
+    .from('servers')
+    .insert({
+      ...serverData,
+      slug,
+      source: 'community'
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function updateServer(id, updates) {
+  const { data, error } = await supabase
+    .from('servers')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function voteForServer(serverId) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Must be logged in to vote')
+
+  const { data, error } = await supabase
+    .from('server_votes')
+    .insert({
+      server_id: serverId,
+      user_id: user.id
+    })
+    .select()
+    .single()
+
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error('You have already voted for this server today')
+    }
+    throw error
+  }
+
+  return data
+}
+
+export async function checkUserVote(serverId) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { data, error } = await supabase
+    .from('server_votes')
+    .select('id')
+    .eq('server_id', serverId)
+    .eq('user_id', user.id)
+    .eq('vote_date', new Date().toISOString().split('T')[0])
+    .maybeSingle()
+
+  if (error) {
+    console.error('Error checking vote:', error)
+    return false
+  }
+
+  return !!data
+}
+
+export async function addServerTags(serverId, tagIds) {
+  const inserts = tagIds.map(tagId => ({
+    server_id: serverId,
+    tag_id: tagId
+  }))
+
+  const { error } = await supabase
+    .from('server_tags')
+    .insert(inserts)
+
+  if (error) throw error
+}
+
+export async function fetchServerTags() {
+  const { data, error } = await supabase
+    .from('tags')
+    .select('*')
+    .order('name')
+
+  if (error) throw error
+  return data
 }
 
 // ============================================
