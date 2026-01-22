@@ -2,8 +2,8 @@
 // Uses multi-protocol query system with fallback
 // Run with: node scripts/check-server-status.js
 
-const { createClient } = require('@supabase/supabase-js');
-const { queryServer } = require('./lib/server-query.js');
+import { createClient } from '@supabase/supabase-js';
+import { queryServer } from './lib/server-query.js';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;

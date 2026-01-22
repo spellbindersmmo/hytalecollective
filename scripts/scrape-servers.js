@@ -1,7 +1,7 @@
 // Simple server scraper script
 // Run with: node scripts/scrape-servers.js
 
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
 
 // Load environment variables
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
