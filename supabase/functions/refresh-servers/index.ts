@@ -77,7 +77,7 @@ Deno.serve(async (req) => {
         current_players: server.players_online || 0,
         max_players: server.players_total || 100,
         status: server.status === 1 ? 'online' : 'offline',
-        total_votes: server.votes || 0,
+        // Don't import external votes - only count votes from our site
         source: 'hytaleonlineservers',
         source_url: server.server_link || 'https://hytaleonlineservers.com',
         external_id: String(server.id),
