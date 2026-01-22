@@ -1,5 +1,16 @@
 import { supabase, getStorageUrl } from '../supabase.js'
 
+// Helper to handle both external URLs and storage paths
+function resolveImageUrl(bucket, path) {
+  if (!path) return null
+  // If it's already a full URL, return as-is
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path
+  }
+  // Otherwise, get from Supabase storage
+  return getStorageUrl(bucket, path)
+}
+
 // ============================================
 // BUILDS
 // ============================================
@@ -74,11 +85,8 @@ export async function fetchBuildBySlug(slug) {
 
   if (error) throw error
 
-  // Increment view count
-  await supabase
-    .from('builds')
-    .update({ view_count: data.view_count + 1 })
-    .eq('id', data.id)
+  // Increment view count using RPC function (bypasses RLS)
+  await supabase.rpc('increment_build_view', { build_uuid: data.id })
 
   return {
     ...data,
@@ -126,11 +134,8 @@ export async function fetchWorldBySlug(slug) {
 
   if (error) throw error
 
-  // Increment view count
-  await supabase
-    .from('worlds')
-    .update({ view_count: data.view_count + 1 })
-    .eq('id', data.id)
+  // Increment view count using RPC function (bypasses RLS)
+  await supabase.rpc('increment_world_view', { world_uuid: data.id })
 
   return {
     ...data,
@@ -161,8 +166,8 @@ export async function fetchFeaturedServers(limit = 4) {
 
   return data.map(server => ({
     ...server,
-    icon: getStorageUrl('servers', server.icon_url),
-    banner: getStorageUrl('servers', server.banner_url),
+    icon: resolveImageUrl('servers', server.icon_url),
+    banner: resolveImageUrl('servers', server.banner_url),
     tags: server.tags.map(t => t.tag.name)
   }))
 }
@@ -201,8 +206,8 @@ export async function fetchServers({ page = 1, limit = 20, tag = null, status = 
   return {
     servers: data.map(server => ({
       ...server,
-      icon: getStorageUrl('servers', server.icon_url),
-      banner: getStorageUrl('servers', server.banner_url),
+      icon: resolveImageUrl('servers', server.icon_url),
+      banner: resolveImageUrl('servers', server.banner_url),
       tags: server.tags.map(t => t.tag.name)
     })),
     total: count,
@@ -224,16 +229,13 @@ export async function fetchServerBySlug(slug) {
 
   if (error) throw error
 
-  // Increment view count
-  await supabase
-    .from('servers')
-    .update({ view_count: data.view_count + 1 })
-    .eq('id', data.id)
+  // Increment view count using RPC function (bypasses RLS)
+  await supabase.rpc('increment_server_view', { server_uuid: data.id })
 
   return {
     ...data,
-    icon: getStorageUrl('servers', data.icon_url),
-    banner: getStorageUrl('servers', data.banner_url),
+    icon: resolveImageUrl('servers', data.icon_url),
+    banner: resolveImageUrl('servers', data.banner_url),
     tags: data.tags.map(t => t.tag)
   }
 }
@@ -417,11 +419,8 @@ export async function fetchPostBySlug(slug) {
 
   if (error) throw error
 
-  // Increment view count
-  await supabase
-    .from('forum_posts')
-    .update({ view_count: data.view_count + 1 })
-    .eq('id', data.id)
+  // Increment view count using RPC function (bypasses RLS)
+  await supabase.rpc('increment_post_view', { post_uuid: data.id })
 
   return {
     ...data,
