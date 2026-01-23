@@ -18,6 +18,10 @@
   import ServersPage from './lib/ServersPage.svelte'
   import AddServerPage from './lib/AddServerPage.svelte'
   import ServerDetailPage from './lib/ServerDetailPage.svelte'
+  import ModsPage from './lib/ModsPage.svelte'
+  import ModDetailPage from './lib/ModDetailPage.svelte'
+  import BuildsPage from './lib/BuildsPage.svelte'
+  import BuildDetailPage from './lib/BuildDetailPage.svelte'
   import { auth } from './lib/stores/auth.svelte.js'
   import {
     fetchFeaturedBuilds,
@@ -43,6 +47,8 @@
   let newPostCategorySlug = $derived(getRouteParam(currentPage, 'forum-new-post-') || '')
   let profileUsername = $derived(getRouteParam(currentPage, 'profile-'))
   let serverSlug = $derived(getRouteParam(currentPage, 'server-'))
+  let modSlug = $derived(getRouteParam(currentPage, 'mod-'))
+  let buildSlug = $derived(getRouteParam(currentPage, 'build-'))
 
   // Data fetched from Supabase
   let featuredBuilds = $state([])
@@ -102,6 +108,14 @@
   <ProfilePage username={profileUsername} onnavigate={navigate} />
 {:else if currentPage === 'settings'}
   <SettingsPage onnavigate={navigate} />
+{:else if modSlug}
+  <ModDetailPage modSlug={modSlug} onnavigate={navigate} />
+{:else if currentPage === 'mods'}
+  <ModsPage onnavigate={navigate} />
+{:else if buildSlug}
+  <BuildDetailPage buildSlug={buildSlug} onnavigate={navigate} />
+{:else if currentPage === 'builds'}
+  <BuildsPage onnavigate={navigate} />
 {:else if currentPage === 'servers'}
   <ServersPage onnavigate={navigate} />
 {:else if currentPage === 'servers-add'}
