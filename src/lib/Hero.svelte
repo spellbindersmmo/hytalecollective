@@ -5,7 +5,17 @@
 
   let { onnavigate = () => {} } = $props()
 
-  let stats = $state({ builds: 0, servers: 0, users: 0 })
+  // Load cached stats from localStorage or default to 0
+  function getCachedStats() {
+    if (typeof localStorage === 'undefined') return { builds: 0, servers: 0, users: 0 }
+    try {
+      const cached = localStorage.getItem('heroStats')
+      if (cached) return JSON.parse(cached)
+    } catch (e) {}
+    return { builds: 0, servers: 0, users: 0 }
+  }
+
+  let stats = $state(getCachedStats())
 
   onMount(async () => {
     try {
@@ -24,6 +34,9 @@
         servers: serversCount || 0,
         users: usersCount || 0
       }
+
+      // Cache stats for next page load
+      localStorage.setItem('heroStats', JSON.stringify(stats))
     } catch (e) {
       console.error('Error fetching stats:', e)
     }

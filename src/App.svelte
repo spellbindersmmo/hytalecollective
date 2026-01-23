@@ -31,6 +31,7 @@
     fetchRecentPosts
   } from './lib/stores/data.svelte.js'
   import { searchProjects } from './lib/modtale.js'
+  import { checkConnection } from './lib/supabase.js'
 
   // Simple page routing
   let currentPage = $state('home')
@@ -59,6 +60,7 @@
   let recentPosts = $state([])
   let loading = $state(true)
   let error = $state(null)
+  let connectionFailed = $state(false)
 
   function navigate(page) {
     currentPage = page
@@ -70,43 +72,62 @@
     window.navigate = navigate
   }
 
-  // Add timeout wrapper for fetch operations
-  function withTimeout(promise, ms = 10000) {
-    return Promise.race([
-      promise,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Request timeout')), ms)
-      )
-    ])
+  // Fetch with retry logic for resilience
+  async function fetchWithRetry(fetchFn, fallback, retries = 2, timeout = 15000) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const result = await Promise.race([
+          fetchFn(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Request timeout')), timeout)
+          )
+        ])
+        return result
+      } catch (e) {
+        console.warn(`Fetch attempt ${attempt + 1} failed:`, e.message)
+        if (attempt === retries) {
+          return fallback
+        }
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+    }
+    return fallback
   }
 
-  onMount(async () => {
-    // Initialize auth with timeout
-    try {
-      await withTimeout(auth.initialize(), 5000)
-    } catch (e) {
-      console.error('Auth init timeout or error:', e)
+  async function initializeApp() {
+    loading = true
+    connectionFailed = false
+    error = null
+
+    // First, check if Supabase is reachable (with retries)
+    let connected = false
+    for (let attempt = 0; attempt < 3; attempt++) {
+      console.log(`Connection attempt ${attempt + 1}...`)
+      connected = await checkConnection()
+      if (connected) break
+      if (attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+      }
     }
 
-    // Fetch all featured content in parallel with timeouts
+    if (!connected) {
+      console.error('Failed to connect to Supabase after 3 attempts')
+      connectionFailed = true
+      loading = false
+      return
+    }
+
+    // Initialize auth (non-blocking)
+    auth.initialize().catch(e => console.error('Auth init error:', e))
+
+    // Fetch all featured content in parallel with retries
     try {
       const [builds, modsData, servers, posts] = await Promise.all([
-        withTimeout(fetchFeaturedBuilds(4), 8000).catch((e) => {
-          console.error('Error fetching builds:', e)
-          return []
-        }),
-        withTimeout(searchProjects({ size: 4, sort: 'downloads' }), 8000).catch((e) => {
-          console.error('Error fetching mods:', e)
-          return { projects: [] }
-        }),
-        withTimeout(fetchFeaturedServers(4), 8000).catch((e) => {
-          console.error('Error fetching servers:', e)
-          return []
-        }),
-        withTimeout(fetchRecentPosts(5), 8000).catch((e) => {
-          console.error('Error fetching posts:', e)
-          return []
-        })
+        fetchWithRetry(() => fetchFeaturedBuilds(4), []),
+        fetchWithRetry(() => searchProjects({ size: 4, sort: 'downloads' }), { projects: [] }),
+        fetchWithRetry(() => fetchFeaturedServers(4), []),
+        fetchWithRetry(() => fetchRecentPosts(5), [])
       ])
 
       featuredBuilds = builds
@@ -119,6 +140,10 @@
     } finally {
       loading = false
     }
+  }
+
+  onMount(() => {
+    initializeApp()
   })
 </script>
 
@@ -157,7 +182,23 @@
   <Navbar currentPage="home" onnavigate={navigate} />
 
   <main>
-    <Hero onnavigate={navigate} />
+    {#if connectionFailed}
+      <div class="connection-error">
+        <div class="connection-error-content">
+          <svg class="connection-error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <h2>Connection Error</h2>
+          <p>Unable to connect to the server. This might be a temporary issue.</p>
+          <Button variant="primary" onclick={() => initializeApp()}>
+            Try Again
+          </Button>
+        </div>
+      </div>
+    {:else}
+      <Hero onnavigate={navigate} />
 
     <!-- Servers Section -->
     <section class="section">
@@ -321,6 +362,7 @@
         </div>
       </div>
     </section>
+    {/if}
   </main>
 
   <Footer onnavigate={navigate} />
@@ -533,5 +575,43 @@
     padding: 2rem;
     font-style: italic;
     grid-column: 1 / -1;
+  }
+
+  .connection-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    padding: 2rem;
+  }
+
+  .connection-error-content {
+    text-align: center;
+    max-width: 400px;
+    background: linear-gradient(180deg, #2a241c 0%, #1e1a15 100%);
+    border: 1px solid #3d3428;
+    border-radius: 12px;
+    padding: 3rem 2rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  .connection-error-icon {
+    width: 64px;
+    height: 64px;
+    color: #c9973b;
+    margin-bottom: 1.5rem;
+  }
+
+  .connection-error-content h2 {
+    color: #f5d898;
+    font-size: 1.5rem;
+    margin: 0 0 0.75rem 0;
+  }
+
+  .connection-error-content p {
+    color: #a89a8c;
+    font-size: 1rem;
+    line-height: 1.5;
+    margin: 0 0 1.5rem 0;
   }
 </style>

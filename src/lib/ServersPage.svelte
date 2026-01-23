@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import Navbar from './Navbar.svelte'
   import Footer from './Footer.svelte'
   import Panel from './Panel.svelte'
@@ -15,6 +15,9 @@
   let tags = $state([])
   let loading = $state(true)
   let totalServers = $state(0)
+  let refreshing = $state(false)
+  let lastUpdated = $state(null)
+  let loadError = $state(null)
 
   // Filters
   let search = $state('')
@@ -24,35 +27,113 @@
   let currentPage = $state(1)
   const limit = 12
 
+  // Polling
+  const POLL_INTERVAL = 3 * 60 * 1000 // 3 minutes
+  let pollTimer = null
+
   // Debounced search
   let searchTimeout = null
 
-  // Timeout wrapper
-  function withTimeout(promise, ms = 10000) {
-    return Promise.race([
-      promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), ms))
-    ])
+  // Retry configuration
+  const MAX_RETRIES = 2
+  const INITIAL_TIMEOUT = 15000 // 15 seconds
+  const RETRY_TIMEOUT = 20000 // 20 seconds for retries
+
+  // Timeout wrapper with retry logic
+  async function fetchWithRetry(fetchFn, retries = MAX_RETRIES) {
+    let lastError = null
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const timeout = attempt === 0 ? INITIAL_TIMEOUT : RETRY_TIMEOUT
+
+      try {
+        const result = await Promise.race([
+          fetchFn(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Request timeout')), timeout)
+          )
+        ])
+        return result
+      } catch (e) {
+        lastError = e
+        console.warn(`Fetch attempt ${attempt + 1} failed:`, e.message)
+
+        // Don't retry on non-timeout errors
+        if (!e.message.includes('timeout')) {
+          throw e
+        }
+
+        // Wait a bit before retrying
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        }
+      }
+    }
+
+    throw lastError
   }
 
-  async function loadServers() {
-    loading = true
+  async function loadServers(isRefresh = false) {
+    if (isRefresh) {
+      refreshing = true
+    } else {
+      loading = true
+    }
+    loadError = null
+
     try {
-      const result = await withTimeout(fetchServers({
-        page: currentPage,
-        limit,
-        status: statusFilter !== 'all' ? statusFilter : null,
-        tag: tagFilter || null,
-        search: search || null,
-        sortBy
-      }))
+      const result = await fetchWithRetry(() =>
+        fetchServers({
+          page: currentPage,
+          limit,
+          status: statusFilter !== 'all' ? statusFilter : null,
+          tag: tagFilter || null,
+          search: search || null,
+          sortBy
+        })
+      )
       servers = result.servers
       totalServers = result.total
+      lastUpdated = new Date()
     } catch (e) {
       console.error('Error loading servers:', e)
+      loadError = e.message
+      // Keep existing data on refresh failure
+      if (!isRefresh) {
+        servers = []
+        totalServers = 0
+      }
     } finally {
       loading = false
+      refreshing = false
     }
+  }
+
+  async function manualRefresh() {
+    await loadServers(true)
+  }
+
+  function startPolling() {
+    stopPolling()
+    pollTimer = setInterval(() => {
+      loadServers(true)
+    }, POLL_INTERVAL)
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+  }
+
+  function formatLastUpdated() {
+    if (!lastUpdated) return ''
+    const now = new Date()
+    const diff = Math.floor((now - lastUpdated) / 1000)
+    if (diff < 60) return 'just now'
+    if (diff < 120) return '1 min ago'
+    return `${Math.floor(diff / 60)} mins ago`
   }
 
   function handleSearchInput(e) {
@@ -90,9 +171,15 @@
         fetchServerTags()
       ])
       tags = tagsData || []
+      // Start polling for updates
+      startPolling()
     } catch (e) {
       console.error('Error initializing:', e)
     }
+  })
+
+  onDestroy(() => {
+    stopPolling()
   })
 
   const totalPages = $derived(Math.ceil(totalServers / limit))
@@ -176,9 +263,37 @@
             {totalServers} server{totalServers !== 1 ? 's' : ''} found
           {/if}
         </span>
+        <div class="refresh-section">
+          {#if lastUpdated}
+            <span class="last-updated">Updated {formatLastUpdated()}</span>
+          {/if}
+          <button class="refresh-btn" onclick={manualRefresh} disabled={refreshing || loading}>
+            <svg class:spinning={refreshing} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 4v6h-6" />
+              <path d="M1 20v-6h6" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
-      {#if loading}
+      {#if loadError && !loading && servers.length === 0}
+        <Panel>
+          <div class="error-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <h3>Failed to load servers</h3>
+            <p>{loadError}</p>
+            <Button variant="primary" onclick={() => loadServers()}>
+              Try Again
+            </Button>
+          </div>
+        </Panel>
+      {:else if loading}
         <div class="loading-grid">
           {#each Array(6) as _}
             <div class="skeleton-card"></div>
@@ -402,11 +517,62 @@
     justify-content: space-between;
     align-items: center;
     margin: 1.5rem 0 1rem 0;
+    flex-wrap: wrap;
+    gap: 0.75rem;
   }
 
   .results-count {
     font-size: 0.9rem;
     color: #8a7a6a;
+  }
+
+  .refresh-section {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .last-updated {
+    font-size: 0.8rem;
+    color: #6a5a4a;
+  }
+
+  .refresh-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.85rem;
+    background: linear-gradient(180deg, #3a3127 0%, #302820 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 4px;
+    color: #c4b8a4;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .refresh-btn:hover:not(:disabled) {
+    border-color: #6b5a48;
+    color: #f0e6d8;
+  }
+
+  .refresh-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .refresh-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .refresh-btn svg.spinning {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 
   .server-grid {
@@ -458,6 +624,33 @@
   @keyframes shimmer {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
+  }
+
+  /* Error state */
+  .error-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 3rem 2rem;
+    text-align: center;
+  }
+
+  .error-state svg {
+    width: 64px;
+    height: 64px;
+    color: #c46b6b;
+    margin-bottom: 1rem;
+  }
+
+  .error-state h3 {
+    font-size: 1.25rem;
+    color: #c4b8a4;
+    margin: 0 0 0.5rem 0;
+  }
+
+  .error-state p {
+    color: #8a7a6a;
+    margin: 0 0 1.5rem 0;
   }
 
   /* Empty state */

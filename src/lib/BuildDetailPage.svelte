@@ -5,6 +5,7 @@
   import Button from './Button.svelte'
   import { auth } from './stores/auth.svelte.js'
   import { fetchBuildBySlug, recordDownload, deleteBuild, updateBuild, updateBuildTags, fetchAllTags } from './stores/data.svelte.js'
+  import { supabase, getStorageUrl } from './supabase.js'
 
   let { buildSlug = '', onnavigate = () => {} } = $props()
 
@@ -23,6 +24,12 @@
   let editTags = $state([])
   let availableTags = $state([])
   let saving = $state(false)
+  let saveError = $state(null)
+
+  // Image edit state
+  let editImageFile = $state(null)
+  let editImagePreview = $state(null)
+  let imageInput = $state(null)
 
   // Check if current user is the author or admin
   const isAuthor = $derived(
@@ -103,6 +110,7 @@
     // Initialize editTags with current tag IDs
     editTags = build.tags ? build.tags.map(t => t.id) : []
     editing = true
+    saveError = null
     // Load tags for editing (only fetches once)
     await loadTags()
   }
@@ -112,6 +120,36 @@
     editTitle = ''
     editDescription = ''
     editTags = []
+    editImageFile = null
+    editImagePreview = null
+    saveError = null
+  }
+
+  function handleImageSelect(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      saveError = 'Please select an image file'
+      return
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      saveError = 'Image must be less than 5MB'
+      return
+    }
+
+    saveError = null
+    editImageFile = file
+    editImagePreview = URL.createObjectURL(file)
+  }
+
+  function removeEditImage() {
+    editImageFile = null
+    editImagePreview = null
+    if (imageInput) imageInput.value = ''
   }
 
   function toggleTag(tag) {
@@ -126,13 +164,41 @@
     if (!editTitle.trim()) return
 
     saving = true
-    error = null
+    saveError = null
 
     try {
-      await updateBuild(build.id, {
+      let newThumbnailPath = null
+
+      // Upload new image if selected
+      if (editImageFile) {
+        const fileExt = editImageFile.name.split('.').pop()
+        const fileName = `${build.id}-${Date.now()}.${fileExt}`
+
+        const { error: uploadError } = await supabase.storage
+          .from('thumbnails')
+          .upload(fileName, editImageFile, { upsert: true })
+
+        if (uploadError) throw uploadError
+        newThumbnailPath = fileName
+
+        // Delete old thumbnail if it exists
+        if (build.thumbnail_path) {
+          await supabase.storage
+            .from('thumbnails')
+            .remove([build.thumbnail_path])
+        }
+      }
+
+      // Update build
+      const updates = {
         title: editTitle.trim(),
         description: editDescription.trim()
-      })
+      }
+      if (newThumbnailPath) {
+        updates.thumbnail_path = newThumbnailPath
+      }
+
+      await updateBuild(build.id, updates)
 
       // Update tags
       await updateBuildTags(build.id, editTags)
@@ -140,15 +206,22 @@
       // Update local state
       build.title = editTitle.trim()
       build.description = editDescription.trim()
+      if (newThumbnailPath) {
+        build.thumbnail_path = newThumbnailPath
+        build.thumbnail = getStorageUrl('thumbnails', newThumbnailPath)
+      }
       // Update tags in local state - map tag IDs to full tag objects
       build.tags = editTags.map(tagId => {
         const tag = availableTags.find(t => t.id === tagId)
         return tag || { id: tagId, name: 'Unknown', color: '#c4b8a4' }
       })
+
       editing = false
+      editImageFile = null
+      editImagePreview = null
     } catch (e) {
       console.error('Error updating build:', e)
-      error = 'Failed to save changes'
+      saveError = 'Failed to save changes'
     } finally {
       saving = false
     }
@@ -221,17 +294,54 @@
           <div class="main-content">
             <!-- Thumbnail -->
             <Panel>
-              <div class="build-preview">
-                {#if build.thumbnail}
-                  <img src={build.thumbnail} alt={build.title} class="preview-image" />
-                {:else}
-                  <div class="preview-placeholder">
+              <div class="build-preview" class:editing>
+                {#if editing}
+                  {#if editImagePreview}
+                    <img src={editImagePreview} alt="New thumbnail preview" class="preview-image" />
+                    <button class="remove-image-btn" onclick={removeEditImage} type="button">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  {:else if build.thumbnail}
+                    <img src={build.thumbnail} alt={build.title} class="preview-image" />
+                  {:else}
+                    <div class="preview-placeholder">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <polyline points="21 15 16 10 5 21" />
+                      </svg>
+                    </div>
+                  {/if}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    bind:this={imageInput}
+                    onchange={handleImageSelect}
+                    class="hidden-input"
+                  />
+                  <button class="change-image-btn" onclick={() => imageInput?.click()} type="button">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                       <circle cx="8.5" cy="8.5" r="1.5" />
                       <polyline points="21 15 16 10 5 21" />
                     </svg>
-                  </div>
+                    Change Image
+                  </button>
+                {:else}
+                  {#if build.thumbnail}
+                    <img src={build.thumbnail} alt={build.title} class="preview-image" />
+                  {:else}
+                    <div class="preview-placeholder">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <polyline points="21 15 16 10 5 21" />
+                      </svg>
+                    </div>
+                  {/if}
                 {/if}
               </div>
             </Panel>
@@ -427,6 +537,9 @@
                   <h3 class="section-label">Manage</h3>
                   {#if editing}
                     <div class="edit-actions">
+                      {#if saveError}
+                        <p class="save-error">{saveError}</p>
+                      {/if}
                       <button class="save-btn" onclick={saveEdit} disabled={saving || !editTitle.trim()}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                           <polyline points="20 6 9 17 4 12" />
@@ -557,16 +670,22 @@
 
   /* Preview */
   .build-preview {
+    position: relative;
     padding: 0;
     overflow: hidden;
     border-radius: 4px;
   }
 
+  .build-preview.editing {
+    border: 2px dashed #4a3f32;
+  }
+
   .preview-image {
     width: 100%;
-    max-height: 400px;
-    object-fit: cover;
+    max-height: 500px;
+    object-fit: contain;
     display: block;
+    background: #1a1612;
   }
 
   .preview-placeholder {
@@ -581,6 +700,64 @@
   .preview-placeholder svg {
     width: 64px;
     height: 64px;
+  }
+
+  .hidden-input {
+    display: none;
+  }
+
+  .change-image-btn {
+    position: absolute;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+    background: rgba(0, 0, 0, 0.75);
+    border: 1px solid #4a3f32;
+    border-radius: 6px;
+    color: #f0e6d8;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .change-image-btn:hover {
+    background: rgba(0, 0, 0, 0.9);
+    border-color: #6b5a48;
+  }
+
+  .change-image-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .remove-image-btn {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: rgba(180, 60, 60, 0.9);
+    border: none;
+    border-radius: 50%;
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .remove-image-btn:hover {
+    background: rgba(200, 70, 70, 1);
+  }
+
+  .remove-image-btn svg {
+    width: 18px;
+    height: 18px;
   }
 
   /* Header */
@@ -973,6 +1150,16 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+  }
+
+  .save-error {
+    margin: 0 0 0.5rem 0;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+    color: #e8b8b8;
+    background: rgba(180, 60, 60, 0.2);
+    border: 1px solid rgba(180, 60, 60, 0.4);
+    border-radius: 4px;
   }
 
   .edit-btn {
