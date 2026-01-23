@@ -9,7 +9,6 @@
     { id: 'home', label: 'Home', href: '/' },
     { id: 'mods', label: 'Mods', href: '/mods' },
     { id: 'builds', label: 'Builds', href: '/builds' },
-    { id: 'worlds', label: 'Worlds', href: '/worlds' },
     { id: 'servers', label: 'Servers', href: '/servers' },
     { id: 'forum', label: 'Forum', href: '/forum' }
   ]
@@ -87,18 +86,6 @@
       {/each}
     </div>
 
-    <!-- Upload Button -->
-    {#if auth.isAuthenticated}
-      <button class="upload-btn" onclick={() => onnavigate('upload')}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="17 8 12 3 7 8" />
-          <line x1="12" y1="3" x2="12" y2="15" />
-        </svg>
-        <span>Upload</span>
-      </button>
-    {/if}
-
     <!-- Auth Buttons -->
     <div class="nav-auth">
       {#if auth.isAuthenticated}
@@ -125,14 +112,6 @@
                   <circle cx="12" cy="7" r="4" />
                 </svg>
                 Profile
-              </a>
-              <a href="/my-uploads" class="dropdown-item" onclick={(e) => { e.preventDefault(); closeUserMenu(); onnavigate('upload'); }}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" y1="3" x2="12" y2="15" />
-                </svg>
-                My Uploads
               </a>
               <a href="/settings" class="dropdown-item" onclick={(e) => { e.preventDefault(); closeUserMenu(); onnavigate('settings'); }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -189,14 +168,6 @@
       {/each}
       <div class="mobile-auth">
         {#if auth.isAuthenticated}
-          <a href="/upload" class="mobile-link upload" onclick={(e) => { e.preventDefault(); mobileMenuOpen = false; onnavigate('upload'); }}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-            Upload
-          </a>
           <a href="/profile" class="mobile-link" onclick={(e) => { e.preventDefault(); mobileMenuOpen = false; onnavigate(`profile-${auth.profile?.username}`); }}>Profile</a>
           <a href="/settings" class="mobile-link" onclick={(e) => { e.preventDefault(); mobileMenuOpen = false; onnavigate('settings'); }}>Settings</a>
           <button class="mobile-link logout" onclick={handleSignOut}>Sign Out</button>
@@ -448,19 +419,6 @@
     text-align: left;
   }
 
-  .mobile-link.upload {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: #d4a44c;
-    background: rgba(212, 164, 76, 0.1);
-  }
-
-  .mobile-link.upload svg {
-    width: 18px;
-    height: 18px;
-  }
-
   @media (max-width: 640px) {
     .logo-text {
       display: none;
@@ -584,46 +542,5 @@
     height: 1px;
     background: #3d3428;
     margin: 0.5rem 0;
-  }
-
-  /* Upload Button */
-  .upload-btn {
-    display: none;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    font-family: 'Cinzel', serif;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #1a1208;
-    background: linear-gradient(180deg, #e8c36b 0%, #c49a3a 50%, #a67c28 100%);
-    border: 2px solid #8b6914;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.15s;
-    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.2);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.3),
-      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
-      0 2px 4px rgba(0, 0, 0, 0.3);
-  }
-
-  .upload-btn:hover {
-    background: linear-gradient(180deg, #f0d080 0%, #d4a844 50%, #b88830 100%);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.4),
-      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
-      0 2px 8px rgba(212, 164, 76, 0.4);
-  }
-
-  .upload-btn svg {
-    width: 18px;
-    height: 18px;
-  }
-
-  @media (min-width: 768px) {
-    .upload-btn {
-      display: flex;
-    }
   }
 </style>

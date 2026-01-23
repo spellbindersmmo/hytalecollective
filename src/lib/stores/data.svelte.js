@@ -96,6 +96,39 @@ export async function fetchBuildBySlug(slug) {
   }
 }
 
+export async function deleteBuild(buildId, filePath, thumbnailPath) {
+  // Delete storage files first
+  if (filePath) {
+    const { error: fileError } = await supabase.storage
+      .from('builds')
+      .remove([filePath])
+    if (fileError) console.error('Error deleting build file:', fileError)
+  }
+
+  if (thumbnailPath) {
+    const { error: thumbError } = await supabase.storage
+      .from('thumbnails')
+      .remove([thumbnailPath])
+    if (thumbError) console.error('Error deleting thumbnail:', thumbError)
+  }
+
+  // Delete tags association
+  const { error: tagError } = await supabase
+    .from('build_tags')
+    .delete()
+    .eq('build_id', buildId)
+
+  if (tagError) console.error('Error deleting build tags:', tagError)
+
+  // Delete the build record
+  const { error } = await supabase
+    .from('builds')
+    .delete()
+    .eq('id', buildId)
+
+  if (error) throw error
+}
+
 // ============================================
 // WORLDS
 // ============================================
