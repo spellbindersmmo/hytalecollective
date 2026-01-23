@@ -6,6 +6,7 @@
   import Button from './Button.svelte'
   import { auth } from './stores/auth.svelte.js'
   import { fetchBuilds, fetchPopularTags } from './stores/data.svelte.js'
+  import { ensureConnection, markFailure, markSuccess } from './supabase.js'
 
   let { onnavigate = () => {} } = $props()
 
@@ -14,6 +15,7 @@
   let tags = $state([])
   let loading = $state(true)
   let totalBuilds = $state(0)
+  let loadError = $state(null)
 
   // Filters
   let search = $state('')
@@ -25,25 +27,58 @@
   // Debounced search
   let searchTimeout = null
 
-  // Timeout wrapper
-  function withTimeout(promise, ms = 10000) {
-    return Promise.race([
-      promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), ms))
-    ])
+  // Retry configuration
+  const MAX_RETRIES = 2
+  const TIMEOUT = 20000 // 20 seconds
+
+  // Fetch with retry logic and connection recovery
+  async function fetchWithRetry(fetchFn, retries = MAX_RETRIES) {
+    let lastError = null
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        // On retry attempts, try to ensure connection is healthy
+        if (attempt > 0) {
+          console.log('Checking connection before retry...')
+          await ensureConnection()
+        }
+
+        const result = await Promise.race([
+          fetchFn(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Request timeout')), TIMEOUT)
+          )
+        ])
+        markSuccess()
+        return result
+      } catch (e) {
+        lastError = e
+        console.warn(`Fetch attempt ${attempt + 1} failed:`, e.message)
+        markFailure()
+
+        // Wait before retrying with exponential backoff
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)))
+        }
+      }
+    }
+
+    throw lastError
   }
 
   // Sort options
   const sortOptions = [
     { value: 'download_count', label: 'Most Downloads' },
+    { value: 'total_votes', label: 'Most Votes' },
     { value: 'created_at', label: 'Newest' },
     { value: 'title', label: 'Name' }
   ]
 
   async function loadBuilds() {
     loading = true
+    loadError = null
     try {
-      const result = await withTimeout(fetchBuilds({
+      const result = await fetchWithRetry(() => fetchBuilds({
         page: currentPage,
         limit,
         tag: tagFilter || null,
@@ -54,6 +89,9 @@
       totalBuilds = result.total
     } catch (e) {
       console.error('Error loading builds:', e)
+      loadError = e.message
+      builds = []
+      totalBuilds = 0
     } finally {
       loading = false
     }
@@ -185,7 +223,22 @@
         </span>
       </div>
 
-      {#if loading}
+      {#if loadError && !loading}
+        <Panel>
+          <div class="error-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <h3>Failed to load builds</h3>
+            <p>{loadError}</p>
+            <Button variant="primary" onclick={() => loadBuilds()}>
+              Try Again
+            </Button>
+          </div>
+        </Panel>
+      {:else if loading}
         <div class="loading-grid">
           {#each Array(6) as _}
             <div class="skeleton-card"></div>
@@ -238,6 +291,14 @@
                     </svg>
                     {formatNumber(build.download_count || 0)}
                   </span>
+                  {#if build.total_votes > 0}
+                    <span class="stat vote-stat">
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                      </svg>
+                      {formatNumber(build.total_votes)}
+                    </span>
+                  {/if}
                   {#if build.block_count}
                     <span class="stat">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -501,7 +562,8 @@
 
   .build-thumbnail {
     position: relative;
-    height: 140px;
+    aspect-ratio: 16 / 10;
+    min-height: 180px;
     background:
       radial-gradient(ellipse at 30% 40%, rgba(55, 46, 35, 0.6) 0%, transparent 60%),
       linear-gradient(180deg, #2a241c 0%, #1a1714 100%);
@@ -647,6 +709,33 @@
   .empty-state p {
     color: #8a7a6a;
     margin: 0;
+  }
+
+  /* Error state */
+  .error-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 3rem 2rem;
+    text-align: center;
+  }
+
+  .error-state svg {
+    width: 64px;
+    height: 64px;
+    color: #c9973b;
+    margin-bottom: 1rem;
+  }
+
+  .error-state h3 {
+    font-size: 1.25rem;
+    color: #f5d898;
+    margin: 0 0 0.5rem 0;
+  }
+
+  .error-state p {
+    color: #a89a8c;
+    margin: 0 0 1.5rem 0;
   }
 
   /* Pagination */

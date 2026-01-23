@@ -179,6 +179,49 @@ export async function deleteBuild(buildId, filePath, thumbnailPath) {
   if (error) throw error
 }
 
+export async function voteForBuild(buildId) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Must be logged in to vote')
+
+  const { data, error } = await supabase
+    .from('build_votes')
+    .insert({
+      build_id: buildId,
+      user_id: user.id
+    })
+    .select()
+    .single()
+
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error('You have already voted for this build today')
+    }
+    throw error
+  }
+
+  return data
+}
+
+export async function checkBuildVote(buildId) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { data, error } = await supabase
+    .from('build_votes')
+    .select('id')
+    .eq('build_id', buildId)
+    .eq('user_id', user.id)
+    .eq('vote_date', new Date().toISOString().split('T')[0])
+    .maybeSingle()
+
+  if (error) {
+    console.error('Error checking build vote:', error)
+    return false
+  }
+
+  return !!data
+}
+
 // ============================================
 // WORLDS
 // ============================================
@@ -452,8 +495,11 @@ export async function fetchRecentPosts(limit = 5) {
 
   return data.map(post => ({
     ...post,
+    author: post.author?.username || 'Unknown',
     category: post.category.name,
     categoryColor: post.category.color,
+    replies: post.reply_count || 0,
+    views: post.view_count || 0,
     lastActivity: formatRelativeTime(post.last_activity_at)
   }))
 }

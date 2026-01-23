@@ -7,12 +7,14 @@
   import ForumPost from './ForumPost.svelte'
   import { auth } from './stores/auth.svelte.js'
   import { fetchForumCategories, fetchRecentPosts } from './stores/data.svelte.js'
+  import { ensureConnection, markFailure, markSuccess } from './supabase.js'
 
   let { onnavigate = () => {} } = $props()
 
   let categories = $state([])
   let recentPosts = $state([])
   let loading = $state(true)
+  let loadError = $state(null)
 
   // Group categories by section
   const hytaleCategories = $derived(
@@ -22,27 +24,67 @@
     categories.filter(c => c.section === 'website')
   )
 
-  // Timeout wrapper
-  function withTimeout(promise, ms = 10000) {
-    return Promise.race([
-      promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), ms))
-    ])
+  // Retry configuration
+  const MAX_RETRIES = 2
+  const TIMEOUT = 20000 // 20 seconds
+
+  // Fetch with retry logic and connection recovery
+  async function fetchWithRetry(fetchFn, retries = MAX_RETRIES) {
+    let lastError = null
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        // On retry attempts, try to ensure connection is healthy
+        if (attempt > 0) {
+          console.log('Checking connection before retry...')
+          await ensureConnection()
+        }
+
+        const result = await Promise.race([
+          fetchFn(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Request timeout')), TIMEOUT)
+          )
+        ])
+        markSuccess()
+        return result
+      } catch (e) {
+        lastError = e
+        console.warn(`Fetch attempt ${attempt + 1} failed:`, e.message)
+        markFailure()
+
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)))
+        }
+      }
+    }
+
+    throw lastError
   }
 
-  onMount(async () => {
+  async function loadForum() {
+    loading = true
+    loadError = null
+
     try {
       const [cats, posts] = await Promise.all([
-        withTimeout(fetchForumCategories()).catch(() => []),
-        withTimeout(fetchRecentPosts(10)).catch(() => [])
+        fetchWithRetry(() => fetchForumCategories()),
+        fetchWithRetry(() => fetchRecentPosts(10))
       ])
       categories = cats
       recentPosts = posts
     } catch (e) {
       console.error('Error loading forum:', e)
+      loadError = e.message
+      categories = []
+      recentPosts = []
     } finally {
       loading = false
     }
+  }
+
+  onMount(() => {
+    loadForum()
   })
 
   function getCategoryIcon(slug) {
@@ -84,14 +126,30 @@
         {/if}
       </div>
 
-      <div class="forum-layout">
-        <!-- Categories Section -->
-        <section class="categories-section">
-          {#if loading}
-            <Panel>
-              <div class="loading">Loading categories...</div>
-            </Panel>
-          {:else}
+      {#if loadError && !loading}
+        <Panel>
+          <div class="error-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <h3>Failed to load forum</h3>
+            <p>{loadError}</p>
+            <Button variant="primary" onclick={() => loadForum()}>
+              Try Again
+            </Button>
+          </div>
+        </Panel>
+      {:else}
+        <div class="forum-layout">
+          <!-- Categories Section -->
+          <section class="categories-section">
+            {#if loading}
+              <Panel>
+                <div class="loading">Loading categories...</div>
+              </Panel>
+            {:else}
             <!-- Hytale Categories -->
             {#if hytaleCategories.length > 0}
               <div class="category-group">
@@ -211,7 +269,8 @@
             {/if}
           </Panel>
         </section>
-      </div>
+        </div>
+      {/if}
     </div>
   </main>
 
@@ -433,5 +492,31 @@
     padding: 3rem 2rem;
     text-align: center;
     color: #8a7a6a;
+  }
+
+  .error-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 3rem 2rem;
+    text-align: center;
+  }
+
+  .error-state svg {
+    width: 64px;
+    height: 64px;
+    color: #c9973b;
+    margin-bottom: 1rem;
+  }
+
+  .error-state h3 {
+    font-size: 1.25rem;
+    color: #f5d898;
+    margin: 0 0 0.5rem 0;
+  }
+
+  .error-state p {
+    color: #a89a8c;
+    margin: 0 0 1.5rem 0;
   }
 </style>

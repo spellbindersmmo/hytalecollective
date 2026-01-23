@@ -31,7 +31,7 @@
     fetchRecentPosts
   } from './lib/stores/data.svelte.js'
   import { searchProjects } from './lib/modtale.js'
-  import { checkConnection } from './lib/supabase.js'
+  import { ensureConnection, markFailure, markSuccess } from './lib/supabase.js'
 
   // Simple page routing
   let currentPage = $state('home')
@@ -72,27 +72,35 @@
     window.navigate = navigate
   }
 
-  // Fetch with retry logic for resilience
-  async function fetchWithRetry(fetchFn, fallback, retries = 2, timeout = 15000) {
+  // Fetch with retry logic and connection recovery - returns { data, failed } to track failures
+  async function fetchWithRetry(name, fetchFn, fallback, retries = 2, timeout = 20000) {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
+        // On retry attempts, try to ensure connection is healthy
+        if (attempt > 0) {
+          console.log(`${name}: Checking connection before retry...`)
+          await ensureConnection()
+        }
+
         const result = await Promise.race([
           fetchFn(),
           new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Request timeout')), timeout)
           )
         ])
-        return result
+        markSuccess()
+        return { data: result, failed: false }
       } catch (e) {
-        console.warn(`Fetch attempt ${attempt + 1} failed:`, e.message)
+        console.warn(`${name} attempt ${attempt + 1} failed:`, e.message)
+        markFailure()
         if (attempt === retries) {
-          return fallback
+          return { data: fallback, failed: true }
         }
-        // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        // Wait before retry with exponential backoff
+        await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)))
       }
     }
-    return fallback
+    return { data: fallback, failed: true }
   }
 
   async function initializeApp() {
@@ -100,43 +108,47 @@
     connectionFailed = false
     error = null
 
-    // First, check if Supabase is reachable (with retries)
-    let connected = false
-    for (let attempt = 0; attempt < 3; attempt++) {
-      console.log(`Connection attempt ${attempt + 1}...`)
-      connected = await checkConnection()
-      if (connected) break
-      if (attempt < 2) {
-        await new Promise(resolve => setTimeout(resolve, 2000))
-      }
-    }
-
-    if (!connected) {
-      console.error('Failed to connect to Supabase after 3 attempts')
-      connectionFailed = true
-      loading = false
-      return
-    }
-
-    // Initialize auth (non-blocking)
+    // Initialize auth first (non-blocking)
     auth.initialize().catch(e => console.error('Auth init error:', e))
 
     // Fetch all featured content in parallel with retries
     try {
-      const [builds, modsData, servers, posts] = await Promise.all([
-        fetchWithRetry(() => fetchFeaturedBuilds(4), []),
-        fetchWithRetry(() => searchProjects({ size: 4, sort: 'downloads' }), { projects: [] }),
-        fetchWithRetry(() => fetchFeaturedServers(4), []),
-        fetchWithRetry(() => fetchRecentPosts(5), [])
+      const results = await Promise.all([
+        fetchWithRetry('Builds', () => fetchFeaturedBuilds(4), [], 2, 20000),
+        fetchWithRetry('Mods', () => searchProjects({ size: 4, sort: 'downloads' }), { projects: [] }, 2, 20000),
+        fetchWithRetry('Servers', () => fetchFeaturedServers(4), [], 2, 20000),
+        fetchWithRetry('Posts', () => fetchRecentPosts(5), [], 2, 20000)
       ])
 
-      featuredBuilds = builds
-      popularMods = modsData.projects || []
-      featuredServers = servers
-      recentPosts = posts
+      const [buildsResult, modsResult, serversResult, postsResult] = results
+
+      // Check if ALL fetches failed
+      const allFailed = results.every(r => r.failed)
+      const someFailed = results.some(r => r.failed)
+
+      if (allFailed) {
+        console.error('All data fetches failed')
+        connectionFailed = true
+        loading = false
+        return
+      }
+
+      if (someFailed) {
+        const failedNames = []
+        if (buildsResult.failed) failedNames.push('builds')
+        if (modsResult.failed) failedNames.push('mods')
+        if (serversResult.failed) failedNames.push('servers')
+        if (postsResult.failed) failedNames.push('posts')
+        console.warn('Some fetches failed:', failedNames.join(', '))
+      }
+
+      featuredBuilds = buildsResult.data
+      popularMods = modsResult.data.projects || []
+      featuredServers = serversResult.data
+      recentPosts = postsResult.data
     } catch (e) {
       console.error('Error fetching data:', e)
-      error = e.message
+      connectionFailed = true
     } finally {
       loading = false
     }
@@ -264,11 +276,13 @@
               {#each featuredBuilds as build}
                 <BuildCard
                   title={build.title}
+                  slug={build.slug}
                   author={build.author?.username}
                   thumbnail={build.thumbnail}
                   tags={build.tags}
                   downloads={build.download_count}
                   blocks={build.block_count}
+                  votes={build.total_votes}
                 />
               {/each}
             {/if}
@@ -345,23 +359,25 @@
       </div>
     </section>
 
-    <!-- CTA Section -->
-    <section class="section cta-section">
-      <div class="container">
-        <div class="section-panel">
-          <div class="cta-content">
-            <h2 class="cta-title">Ready to Share Your Creations?</h2>
-            <p class="cta-text">
-              Join thousands of builders and adventurers. Upload your builds, share your worlds, and become part of the community.
-            </p>
-            <div class="cta-buttons">
-              <Button variant="primary">Create Account</Button>
-              <Button variant="secondary">Learn More</Button>
+    <!-- CTA Section - only show to non-logged-in users -->
+    {#if !auth.isAuthenticated}
+      <section class="section cta-section">
+        <div class="container">
+          <div class="section-panel">
+            <div class="cta-content">
+              <h2 class="cta-title">Ready to Share Your Creations?</h2>
+              <p class="cta-text">
+                Join thousands of builders and adventurers. Upload your builds, share your worlds, and become part of the community.
+              </p>
+              <div class="cta-buttons">
+                <Button variant="primary" onclick={() => auth.openModal()}>Create Account</Button>
+                <Button variant="secondary">Learn More</Button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+    {/if}
     {/if}
   </main>
 
@@ -382,7 +398,7 @@
 
   .section {
     position: relative;
-    padding: 3rem 1.5rem;
+    padding: 1.5rem 1.5rem;
   }
 
   .section-panel {
@@ -488,17 +504,17 @@
   }
 
   .cta-section {
-    padding: 5rem 1.5rem;
+    padding: 2rem 1.5rem;
   }
 
   .cta-content {
     text-align: center;
-    padding: 2rem 1rem;
+    padding: 1.5rem 1rem;
   }
 
   @media (min-width: 640px) {
     .cta-content {
-      padding: 3rem 2rem;
+      padding: 2rem 2rem;
     }
   }
 
