@@ -4,7 +4,7 @@
   import Panel from './Panel.svelte'
   import Button from './Button.svelte'
   import { auth } from './stores/auth.svelte.js'
-  import { fetchBuildBySlug, recordDownload, deleteBuild, updateBuild, updateBuildTags, fetchAllTags } from './stores/data.svelte.js'
+  import { fetchBuildBySlug, recordDownload, deleteBuild, updateBuild, updateBuildTags, fetchAllTags, voteForBuild, checkBuildVote } from './stores/data.svelte.js'
   import { supabase, getStorageUrl } from './supabase.js'
 
   let { buildSlug = '', onnavigate = () => {} } = $props()
@@ -30,6 +30,11 @@
   let editImageFile = $state(null)
   let editImagePreview = $state(null)
   let imageInput = $state(null)
+
+  // Voting state
+  let hasVotedToday = $state(false)
+  let voting = $state(false)
+  let voteError = $state(null)
 
   // Check if current user is the author or admin
   const isAuthor = $derived(
@@ -58,11 +63,35 @@
 
     try {
       build = await fetchBuildBySlug(buildSlug)
+      // Check if user has voted today
+      if (auth.isAuthenticated && build) {
+        hasVotedToday = await checkBuildVote(build.id)
+      }
     } catch (e) {
       console.error('Error loading build:', e)
       error = 'Build not found'
     } finally {
       loading = false
+    }
+  }
+
+  async function handleVote() {
+    if (!auth.isAuthenticated) {
+      auth.openModal()
+      return
+    }
+    if (hasVotedToday || voting) return
+
+    voting = true
+    voteError = null
+    try {
+      await voteForBuild(build.id)
+      hasVotedToday = true
+      build.total_votes = (build.total_votes || 0) + 1
+    } catch (e) {
+      voteError = e.message
+    } finally {
+      voting = false
     }
   }
 
@@ -470,6 +499,40 @@
             </Panel>
 
             <Panel>
+              <div class="vote-section">
+                <div class="vote-count">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                  </svg>
+                  <span class="count">{build.total_votes || 0}</span>
+                  <span class="label">votes</span>
+                </div>
+                {#if auth.isAuthenticated}
+                  <Button
+                    variant={hasVotedToday ? 'secondary' : 'primary'}
+                    onclick={handleVote}
+                    disabled={hasVotedToday || voting}
+                  >
+                    {#if voting}
+                      Voting...
+                    {:else if hasVotedToday}
+                      Voted Today
+                    {:else}
+                      Vote for Build
+                    {/if}
+                  </Button>
+                {:else}
+                  <Button variant="secondary" onclick={() => auth.openModal()}>
+                    Login to Vote
+                  </Button>
+                {/if}
+                {#if voteError}
+                  <p class="vote-error">{voteError}</p>
+                {/if}
+              </div>
+            </Panel>
+
+            <Panel>
               <div class="stats-section">
                 <h3 class="section-label">Statistics</h3>
                 <div class="stat-row">
@@ -822,6 +885,7 @@
   .description-section,
   .gallery-section,
   .download-section,
+  .vote-section,
   .stats-section,
   .author-section {
     padding: 0.5rem;
@@ -962,6 +1026,44 @@
     color: #6a5a4a;
     font-size: 0.9rem;
     margin: 0;
+  }
+
+  /* Vote Section */
+  .vote-section {
+    text-align: center;
+  }
+
+  .vote-count {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .vote-count svg {
+    width: 28px;
+    height: 28px;
+    color: #d4a44c;
+  }
+
+  .vote-count .count {
+    font-family: 'Cinzel', serif;
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #f5d898;
+  }
+
+  .vote-count .label {
+    font-size: 0.85rem;
+    color: #8a7a6a;
+    text-transform: uppercase;
+  }
+
+  .vote-error {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: #c46b6b;
   }
 
   /* Stats */

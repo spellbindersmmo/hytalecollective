@@ -35,13 +35,13 @@
 <button class="server-card" onclick={handleClick} type="button">
   <div class="card-frame">
     <div class="card-inner">
-      {#if banner}
-        <div class="card-banner">
+      <div class="card-banner">
+        {#if banner}
           <img src={banner} alt="{name} banner" />
-          <div class="banner-overlay"></div>
-        </div>
-      {/if}
-      <div class="card-content" class:has-banner={banner}>
+        {/if}
+        <div class="banner-overlay"></div>
+      </div>
+      <div class="card-content has-banner">
         <div class="server-main">
           <div class="server-header">
             {#if icon}
@@ -110,6 +110,8 @@
   }
 
   .card-frame {
+    width: 100%;
+    box-sizing: border-box;
     background:
       linear-gradient(180deg,
         #5a4d3e 0%,
@@ -153,16 +155,15 @@
     position: relative;
     width: 100%;
     aspect-ratio: 16 / 9;
-    min-height: 160px;
-    max-height: 220px;
     overflow: hidden;
+    background: linear-gradient(135deg, #2a241c 0%, #1e1a15 100%);
   }
 
   .card-banner img {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    object-position: center;
+    object-position: center top;
   }
 
   .banner-overlay {

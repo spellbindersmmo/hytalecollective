@@ -7,6 +7,7 @@
   import ServerCard from './ServerCard.svelte'
   import { auth } from './stores/auth.svelte.js'
   import { fetchServers, fetchServerTags } from './stores/data.svelte.js'
+  import { ensureConnection, markFailure, markSuccess } from './supabase.js'
 
   let { onnavigate = () => {} } = $props()
 
@@ -39,7 +40,7 @@
   const INITIAL_TIMEOUT = 15000 // 15 seconds
   const RETRY_TIMEOUT = 20000 // 20 seconds for retries
 
-  // Timeout wrapper with retry logic
+  // Timeout wrapper with retry logic and connection recovery
   async function fetchWithRetry(fetchFn, retries = MAX_RETRIES) {
     let lastError = null
 
@@ -47,25 +48,28 @@
       const timeout = attempt === 0 ? INITIAL_TIMEOUT : RETRY_TIMEOUT
 
       try {
+        // On retry attempts, try to ensure connection is healthy
+        if (attempt > 0) {
+          console.log('Checking connection before retry...')
+          await ensureConnection()
+        }
+
         const result = await Promise.race([
           fetchFn(),
           new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Request timeout')), timeout)
           )
         ])
+        markSuccess()
         return result
       } catch (e) {
         lastError = e
         console.warn(`Fetch attempt ${attempt + 1} failed:`, e.message)
-
-        // Don't retry on non-timeout errors
-        if (!e.message.includes('timeout')) {
-          throw e
-        }
+        markFailure()
 
         // Wait a bit before retrying
         if (attempt < retries) {
-          await new Promise(resolve => setTimeout(resolve, 1000))
+          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)))
         }
       }
     }
@@ -388,6 +392,7 @@
   .container {
     max-width: 80rem;
     margin: 0 auto;
+    box-sizing: border-box;
   }
 
   .page-header {
@@ -577,19 +582,25 @@
 
   .server-grid {
     display: grid;
-    grid-template-columns: repeat(1, 1fr);
+    grid-template-columns: 1fr;
     gap: 1rem;
+    width: 100%;
+  }
+
+  .server-grid > :global(*) {
+    min-width: 0;
+    max-width: 100%;
   }
 
   @media (min-width: 640px) {
     .server-grid {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: 1fr 1fr;
     }
   }
 
   @media (min-width: 1024px) {
     .server-grid {
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: 1fr 1fr 1fr;
     }
   }
 

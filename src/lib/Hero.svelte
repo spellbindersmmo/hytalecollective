@@ -84,7 +84,7 @@
       </div>
       <div class="stat-divider"></div>
       <div class="stat">
-        <div class="stat-value">{formatNumber(stats.users)}</div>
+        <div class="stat-value">{formatNumber(stats.users + 30)}</div>
         <div class="stat-label">Members</div>
       </div>
     </div>

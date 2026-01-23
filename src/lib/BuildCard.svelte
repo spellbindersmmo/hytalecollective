@@ -5,7 +5,10 @@
     thumbnail = '',
     tags = [],
     downloads = 0,
-    blocks = 0
+    blocks = 0,
+    votes = 0,
+    slug = '',
+    onclick = null
   } = $props()
 
   function formatNumber(num) {
@@ -14,9 +17,17 @@
     }
     return num.toString()
   }
+
+  function handleClick() {
+    if (onclick) {
+      onclick()
+    } else if (slug && typeof window !== 'undefined' && window.navigate) {
+      window.navigate(`build-${slug}`)
+    }
+  }
 </script>
 
-<div class="card">
+<button class="card" onclick={handleClick} type="button">
   <div class="card-frame">
     <div class="card-inner">
       <!-- Thumbnail area -->
@@ -47,11 +58,19 @@
 
         <div class="card-stats">
           <span class="stat">
-            <svg viewBox="0 0 16 16" class="stat-icon">
-              <path fill="currentColor" d="M8 12l-4 2 1-4.5L1 6l4.5-.5L8 1l2.5 4.5L15 6l-4 3.5 1 4.5z"/>
+            <svg viewBox="0 0 16 16" class="stat-icon download-icon">
+              <path fill="currentColor" d="M8 12L3 7h3V1h4v6h3L8 12zM1 14h14v1H1v-1z"/>
             </svg>
             {formatNumber(downloads)}
           </span>
+          {#if votes > 0}
+            <span class="stat">
+              <svg viewBox="0 0 16 16" class="stat-icon vote-icon">
+                <path fill="currentColor" d="M8 12l-4 2 1-4.5L1 6l4.5-.5L8 1l2.5 4.5L15 6l-4 3.5 1 4.5z"/>
+              </svg>
+              {formatNumber(votes)}
+            </span>
+          {/if}
           {#if blocks > 0}
             <span class="stat">
               <svg viewBox="0 0 16 16" class="stat-icon">
@@ -64,12 +83,17 @@
       </div>
     </div>
   </div>
-</div>
+</button>
 
 <style>
   .card {
     cursor: pointer;
     transition: transform 0.2s ease;
+    background: none;
+    border: none;
+    padding: 0;
+    text-align: left;
+    width: 100%;
   }
 
   .card:hover {
@@ -118,7 +142,8 @@
 
   .card-thumbnail {
     position: relative;
-    height: 130px;
+    aspect-ratio: 16 / 10;
+    min-height: 160px;
     background:
       radial-gradient(ellipse at 30% 40%, rgba(55, 46, 35, 0.6) 0%, transparent 60%),
       radial-gradient(ellipse at 70% 60%, rgba(48, 40, 30, 0.5) 0%, transparent 50%),
@@ -221,7 +246,15 @@
   .stat-icon {
     width: 12px;
     height: 12px;
-    color: #d4a44c;
+    color: #8a7a6a;
     filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+  }
+
+  .stat-icon.vote-icon {
+    color: #d4a44c;
+  }
+
+  .stat-icon.download-icon {
+    color: #6bb8cc;
   }
 </style>

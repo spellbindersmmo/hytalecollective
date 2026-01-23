@@ -286,11 +286,13 @@
                 {#each builds as build}
                   <BuildCard
                     title={build.title}
+                    slug={build.slug}
                     author={build.author?.username}
                     thumbnail={build.thumbnail}
                     tags={build.tags}
                     downloads={build.download_count}
                     blocks={build.block_count}
+                    votes={build.total_votes}
                   />
                 {/each}
               </div>
