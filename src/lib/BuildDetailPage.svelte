@@ -119,13 +119,27 @@
       // Record the download
       await recordDownload('build', build.id)
 
+      // Fetch the file as a blob to force download (cross-origin URLs ignore download attribute)
+      const response = await fetch(build.file_url)
+      if (!response.ok) throw new Error('Failed to fetch file')
+
+      const blob = await response.blob()
+      const blobUrl = URL.createObjectURL(blob)
+
+      // Determine file name - Hytale prefabs must end with .prefab.json
+      const baseName = build.title.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')
+      const fileName = `${baseName}.prefab.json`
+
       // Trigger download
       const link = document.createElement('a')
-      link.href = build.file_url
-      link.download = build.file_name || `${build.title}.schematic`
+      link.href = blobUrl
+      link.download = fileName
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
+
+      // Clean up the blob URL
+      URL.revokeObjectURL(blobUrl)
     } catch (e) {
       console.error('Error downloading:', e)
     } finally {
