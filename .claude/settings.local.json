@@ -11,7 +11,16 @@
       "WebFetch(domain:www.curseforge.com)",
       "Bash(dir /B \"C:\\\\Users\\\\owenk\\\\OneDrive\\\\Documents\\\\hytalecollective\\\\src\\\\lib\")",
       "Bash(supabase --version:*)",
-      "WebFetch(domain:hytaleonlineservers.com)"
+      "WebFetch(domain:hytaleonlineservers.com)",
+      "WebFetch(domain:api.curseforge.com)",
+      "Bash(npx vite --port 5173)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "WebFetch(domain:modtale.net)",
+      "WebFetch(domain:api.modtale.net)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }
