@@ -1,10 +1,13 @@
 // Multi-protocol server query system
-// Supports HyQuery, Minecraft SLP, Source A2S, and raw connectivity
+// Supports Hytale Query Plugin, HyQuery, Minecraft SLP, Source A2S, and raw connectivity
 
 import dgram from 'dgram';
 import net from 'net';
+import http from 'http';
+import https from 'https';
 
-const DEFAULT_TIMEOUT = 400; // ms per protocol
+const DEFAULT_TIMEOUT = 400; // ms per protocol (UDP)
+const HTTP_TIMEOUT = 2000; // ms for HTTP-based protocols
 
 /**
  * Unified query result
@@ -42,6 +45,107 @@ export function connectivityResult() {
     motd: null,
     version: null
   };
+}
+
+// ============================================
+// PROTOCOL: Hytale Query Plugin (HTTP REST API)
+// ============================================
+
+/**
+ * Query server using Hytale Query Plugin (Nitrado WebServer)
+ * The WebServer plugin runs on game port + 3
+ * Query endpoint: /Nitrado/Query
+ *
+ * Response format:
+ * {
+ *   "Server": { "Name": "...", "Version": "...", "MaxPlayers": 100 },
+ *   "Universe": { "CurrentPlayers": 15, "DefaultWorld": "..." },
+ *   "Players": [...],
+ *   "Plugins": {...}
+ * }
+ */
+export async function queryHytaleQueryPlugin(host, port, timeout = HTTP_TIMEOUT) {
+  // WebServer runs on game port + 3
+  const webPort = port + 3;
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      resolve(null);
+    }, timeout);
+
+    // Try HTTP first (most common for local/dev servers)
+    const makeRequest = (protocol) => {
+      const client = protocol === 'https' ? https : http;
+
+      const req = client.get({
+        hostname: host,
+        port: webPort,
+        path: '/Nitrado/Query',
+        timeout: timeout,
+        headers: {
+          'Accept': 'application/json'
+        }
+      }, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          clearTimeout(timer);
+
+          if (res.statusCode !== 200) {
+            resolve(null);
+            return;
+          }
+
+          try {
+            const json = JSON.parse(data);
+
+            // Extract data from Hytale Query Plugin response
+            const serverInfo = json.Server || {};
+            const universeInfo = json.Universe || {};
+
+            resolve({
+              online: true,
+              protocol: 'hytale-query',
+              players: {
+                online: universeInfo.CurrentPlayers ?? null,
+                max: serverInfo.MaxPlayers ?? null
+              },
+              motd: serverInfo.Name ?? null,
+              version: serverInfo.Version ?? null
+            });
+          } catch {
+            resolve(null);
+          }
+        });
+      });
+
+      req.on('error', () => {
+        // If HTTP fails and we haven't tried HTTPS yet, try HTTPS
+        if (protocol === 'http') {
+          makeRequest('https');
+        } else {
+          clearTimeout(timer);
+          resolve(null);
+        }
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        if (protocol === 'http') {
+          makeRequest('https');
+        } else {
+          clearTimeout(timer);
+          resolve(null);
+        }
+      });
+    };
+
+    makeRequest('http');
+  });
 }
 
 // ============================================
@@ -461,8 +565,10 @@ export async function checkUDPConnectivity(host, port, timeout = DEFAULT_TIMEOUT
 
 /**
  * Protocol handlers in fallback order
+ * Hytale Query Plugin is tried first as it's the official method
  */
 const PROTOCOL_HANDLERS = [
+  { name: 'hytale-query', handler: queryHytaleQueryPlugin },
   { name: 'hyquery', handler: queryHyQuery },
   { name: 'minecraft-slp', handler: queryMinecraftSLP },
   { name: 'source-a2s', handler: querySourceA2S }

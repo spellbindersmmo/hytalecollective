@@ -12,8 +12,60 @@ export const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true
+  },
+  global: {
+    headers: {
+      'x-client-info': 'hytale-collective'
+    },
+    fetch: (url, options = {}) => {
+      // Add timeout to all fetch requests
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 20000) // 20 second timeout
+
+      return fetch(url, {
+        ...options,
+        signal: controller.signal
+      }).finally(() => clearTimeout(timeoutId))
+    }
+  },
+  // Disable realtime to reduce connection overhead
+  realtime: {
+    params: {
+      eventsPerSecond: 1
+    }
   }
 })
+
+// Connection state tracking
+let isConnected = true
+let lastSuccessfulRequest = Date.now()
+
+// Health check function
+export async function checkConnection() {
+  try {
+    const start = Date.now()
+    const { error } = await supabase.from('profiles').select('id').limit(1).maybeSingle()
+    const elapsed = Date.now() - start
+
+    if (!error) {
+      isConnected = true
+      lastSuccessfulRequest = Date.now()
+      console.debug(`Supabase health check: OK (${elapsed}ms)`)
+      return true
+    }
+    console.warn('Supabase health check failed:', error)
+    isConnected = false
+    return false
+  } catch (e) {
+    console.warn('Supabase health check error:', e)
+    isConnected = false
+    return false
+  }
+}
+
+export function getConnectionState() {
+  return { isConnected, lastSuccessfulRequest }
+}
 
 // Helper to get public URL for storage files
 export function getStorageUrl(bucket, path) {

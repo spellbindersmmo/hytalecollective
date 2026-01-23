@@ -2,7 +2,7 @@
 // Usage: node scripts/test-server-query.js <host> [port]
 // Example: node scripts/test-server-query.js play.hyfable.com 25565
 
-import { queryServer, queryHyQuery, queryMinecraftSLP, querySourceA2S } from './lib/server-query.js';
+import { queryServer, queryHytaleQueryPlugin, queryHyQuery, queryMinecraftSLP, querySourceA2S } from './lib/server-query.js';
 
 const host = process.argv[2];
 const port = parseInt(process.argv[3]) || 25565;
@@ -18,15 +18,19 @@ async function testServer() {
   console.log('═'.repeat(50));
 
   // Test each protocol individually
-  console.log('\n1. Testing HyQuery (UDP)...');
+  console.log('\n1. Testing Hytale Query Plugin (HTTP on port+3)...');
+  const hytaleQuery = await queryHytaleQueryPlugin(host, port, 2000);
+  console.log('   Result:', hytaleQuery ? JSON.stringify(hytaleQuery, null, 2).replace(/\n/g, '\n   ') : 'No response');
+
+  console.log('\n2. Testing HyQuery (UDP)...');
   const hyquery = await queryHyQuery(host, port, 500);
   console.log('   Result:', hyquery ? JSON.stringify(hyquery, null, 2).replace(/\n/g, '\n   ') : 'No response');
 
-  console.log('\n2. Testing Minecraft SLP (TCP)...');
+  console.log('\n3. Testing Minecraft SLP (TCP)...');
   const minecraft = await queryMinecraftSLP(host, port, 500);
   console.log('   Result:', minecraft ? JSON.stringify(minecraft, null, 2).replace(/\n/g, '\n   ') : 'No response');
 
-  console.log('\n3. Testing Source A2S (UDP)...');
+  console.log('\n4. Testing Source A2S (UDP)...');
   const source = await querySourceA2S(host, port, 500);
   console.log('   Result:', source ? JSON.stringify(source, null, 2).replace(/\n/g, '\n   ') : 'No response');
 
