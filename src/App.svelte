@@ -323,7 +323,7 @@
     </section>
   </main>
 
-  <Footer />
+  <Footer onnavigate={navigate} />
 </div>
 {/if}
 

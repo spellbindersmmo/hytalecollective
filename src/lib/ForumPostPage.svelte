@@ -5,7 +5,7 @@
   import Panel from './Panel.svelte'
   import Button from './Button.svelte'
   import { auth } from './stores/auth.svelte.js'
-  import { supabase } from './supabase.js'
+  import { supabase, getStorageUrl } from './supabase.js'
 
   let { postSlug = '', onnavigate = () => {} } = $props()
 
@@ -24,6 +24,12 @@
   let showDeleteConfirm = $state(false)
   let deleting = $state(false)
   let replyTextarea = $state(null)
+
+  // Header image for guides
+  const isGuide = $derived(post?.category?.slug === 'guides')
+  const headerImageUrl = $derived(
+    post?.header_image ? getStorageUrl('forum-images', post.header_image) : null
+  )
 
   // Formatting functions for reply
   function insertFormat(before, after = before) {
@@ -203,17 +209,24 @@
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
 
-      // Strikethrough
+      // Strikethrough and underline
       .replace(/~~(.+?)~~/g, '<del>$1</del>')
+      .replace(/\+\+(.+?)\+\+/g, '<u>$1</u>')
+
+      // Horizontal rule
+      .replace(/^---$/gm, '<hr class="md-divider" />')
 
       // Inline code
       .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
 
+      // Images with size (must be before regular images)
+      .replace(/!\[([^\]]*)\]\(([^)#]+)#(small|medium|large)\)/g, '<img src="$2" alt="$1" class="md-image md-image-$3" />')
+
+      // Images (must be before links since ![alt](url) contains [alt](url))
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-image" />')
+
       // Links
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-
-      // Images
-      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-image" />')
 
       // Blockquotes
       .replace(/^&gt; (.+)$/gm, '<blockquote class="md-quote">$1</blockquote>')
@@ -337,10 +350,26 @@
           <span class="current">Post</span>
         </nav>
 
+        <!-- Guide Header Image -->
+        {#if isGuide && headerImageUrl}
+          <div class="guide-header">
+            <img src={headerImageUrl} alt="" class="guide-header-image" />
+            <div class="guide-header-overlay">
+              <span class="guide-badge">Guide</span>
+              <h1 class="guide-header-title">{post.title}</h1>
+              <div class="guide-header-meta">
+                <span>By {post.author.username}</span>
+                <span class="meta-dot"></span>
+                <span>{formatDate(post.created_at)}</span>
+              </div>
+            </div>
+          </div>
+        {/if}
+
         <!-- Original Post -->
         <Panel>
           <article class="post">
-            <header class="post-header">
+            <header class="post-header" class:has-header-image={isGuide && headerImageUrl}>
               <div class="post-header-top">
                 <div class="post-meta">
                   <span
@@ -382,7 +411,7 @@
                   bind:value={editTitle}
                   placeholder="Post title"
                 />
-              {:else}
+              {:else if !(isGuide && headerImageUrl)}
                 <h1 class="post-title">{post.title}</h1>
               {/if}
             </header>
@@ -572,7 +601,7 @@
     </div>
   </main>
 
-  <Footer />
+  <Footer {onnavigate} />
 </div>
 
 <!-- Delete Confirmation Modal -->
@@ -962,6 +991,18 @@
     border: 1px solid #3d3428;
   }
 
+  .markdown-content :global(.md-image-small) {
+    max-width: 25%;
+  }
+
+  .markdown-content :global(.md-image-medium) {
+    max-width: 50%;
+  }
+
+  .markdown-content :global(.md-image-large) {
+    max-width: 75%;
+  }
+
   .markdown-content :global(.code-block) {
     display: block;
     background: rgba(0, 0, 0, 0.4);
@@ -1007,6 +1048,18 @@
 
   .markdown-content :global(li.md-numbered) {
     list-style-type: decimal;
+  }
+
+  .markdown-content :global(u) {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .markdown-content :global(.md-divider) {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #4a3f32 20%, #4a3f32 80%, transparent);
+    margin: 1.5rem 0;
   }
 
   .post-footer {
@@ -1242,5 +1295,102 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.75rem;
+  }
+
+  /* Guide Header */
+  .guide-header {
+    position: relative;
+    width: 100%;
+    height: 280px;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+  }
+
+  .guide-header-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .guide-header-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      to top,
+      rgba(0, 0, 0, 0.85) 0%,
+      rgba(0, 0, 0, 0.4) 50%,
+      rgba(0, 0, 0, 0.2) 100%
+    );
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 1.5rem 2rem;
+  }
+
+  .guide-badge {
+    display: inline-block;
+    width: fit-content;
+    padding: 0.3rem 0.75rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    background: linear-gradient(180deg, #d4a44c 0%, #a67c28 100%);
+    color: #1a1208;
+    border-radius: 4px;
+    margin-bottom: 0.75rem;
+  }
+
+  .guide-header-title {
+    font-family: 'Cinzel', serif;
+    font-size: 2rem;
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 0.75rem 0;
+    line-height: 1.2;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  }
+
+  .guide-header-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .meta-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.5);
+  }
+
+  .post-header.has-header-image {
+    padding-top: 0;
+  }
+
+  .post-header.has-header-image .post-title {
+    display: none;
+  }
+
+  @media (max-width: 640px) {
+    .guide-header {
+      height: 220px;
+      border-radius: 8px;
+    }
+
+    .guide-header-overlay {
+      padding: 1rem 1.25rem;
+    }
+
+    .guide-header-title {
+      font-size: 1.4rem;
+    }
+
+    .guide-header-meta {
+      font-size: 0.75rem;
+    }
   }
 </style>

@@ -6,7 +6,7 @@
   import Button from './Button.svelte'
   import AuthModal from './AuthModal.svelte'
   import { auth } from './stores/auth.svelte.js'
-  import { supabase } from './supabase.js'
+  import { supabase, getStorageUrl } from './supabase.js'
   import { generateUniqueSlug } from './utils.js'
 
   let { categorySlug = '', onnavigate = () => {} } = $props()
@@ -21,6 +21,23 @@
   let showAuthModal = $state(false)
   let contentTextarea = $state(null)
   let showPreview = $state(false)
+  let imageFileInput = $state(null)
+  let uploadingImage = $state(false)
+  let showImageMenu = $state(false)
+  let pendingImageFile = $state(null)
+  let showSizeMenu = $state(false)
+
+  // Header image for guides
+  let headerImage = $state(null)
+  let headerImagePreview = $state(null)
+  let headerImageInput = $state(null)
+  let uploadingHeaderImage = $state(false)
+
+  // Check if selected category is guides
+  const isGuidesCategory = $derived(() => {
+    const category = allCategories.find(c => c.id === selectedCategory)
+    return category?.slug === 'guides'
+  })
 
   // Markdown renderer
   function renderMarkdown(text) {
@@ -38,9 +55,12 @@
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
       .replace(/~~(.+?)~~/g, '<del>$1</del>')
+      .replace(/\+\+(.+?)\+\+/g, '<u>$1</u>')
+      .replace(/^---$/gm, '<hr class="md-divider" />')
       .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+      .replace(/!\[([^\]]*)\]\(([^)#]+)#(small|medium|large)\)/g, '<img src="$2" alt="$1" class="md-image md-image-$3" />')
       .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-image" />')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
       .replace(/^&gt; (.+)$/gm, '<blockquote class="md-quote">$1</blockquote>')
       .replace(/^- (.+)$/gm, '<li class="md-bullet">$1</li>')
       .replace(/^\d+\. (.+)$/gm, '<li class="md-numbered">$1</li>')
@@ -117,7 +137,45 @@
     }, 0)
   }
 
-  function insertImage() {
+  function insertHorizontalRule() {
+    if (!contentTextarea) return
+
+    const start = contentTextarea.selectionStart
+    const beforeCursor = content.substring(0, start)
+
+    // Check if we need a newline before the rule
+    const needsNewlineBefore = beforeCursor.length > 0 && !beforeCursor.endsWith('\n')
+    const rule = (needsNewlineBefore ? '\n' : '') + '---\n'
+
+    content = content.substring(0, start) + rule + content.substring(start)
+
+    setTimeout(() => {
+      contentTextarea.focus()
+      const newPosition = start + rule.length
+      contentTextarea.setSelectionRange(newPosition, newPosition)
+    }, 0)
+  }
+
+  function toggleImageMenu(e) {
+    e.stopPropagation()
+    showImageMenu = !showImageMenu
+  }
+
+  function closeImageMenu() {
+    showImageMenu = false
+  }
+
+  // Close menu when clicking outside
+  $effect(() => {
+    if (showImageMenu) {
+      const handleClick = () => closeImageMenu()
+      document.addEventListener('click', handleClick)
+      return () => document.removeEventListener('click', handleClick)
+    }
+  })
+
+  function insertImageUrl() {
+    showImageMenu = false
     if (!contentTextarea) return
 
     const start = contentTextarea.selectionStart
@@ -134,6 +192,143 @@
       const urlStart = start + altText.length + 4
       contentTextarea.setSelectionRange(urlStart, urlStart + 9)
     }, 0)
+  }
+
+  function triggerImageUpload() {
+    showImageMenu = false
+    imageFileInput?.click()
+  }
+
+  async function handleImageUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+    if (!allowedTypes.includes(file.type)) {
+      error = 'Please select a valid image file (JPEG, PNG, GIF, or WebP)'
+      return
+    }
+
+    // Validate file size (10MB max)
+    if (file.size > 10 * 1024 * 1024) {
+      error = 'Image must be less than 10MB'
+      return
+    }
+
+    // Store file and show size menu
+    pendingImageFile = file
+    showSizeMenu = true
+    showImageMenu = false
+
+    // Reset file input
+    if (imageFileInput) imageFileInput.value = ''
+  }
+
+  async function insertImageWithSize(size) {
+    if (!pendingImageFile) return
+
+    const file = pendingImageFile
+    showSizeMenu = false
+    uploadingImage = true
+    error = null
+
+    try {
+      // Generate unique filename
+      const ext = file.name.split('.').pop()
+      const timestamp = Date.now()
+      const randomId = Math.random().toString(36).substring(2, 8)
+      const filename = `${auth.user.id}/${timestamp}-${randomId}.${ext}`
+
+      // Upload to Supabase storage
+      const { data, error: uploadError } = await supabase.storage
+        .from('forum-images')
+        .upload(filename, file, {
+          cacheControl: '3600',
+          upsert: false
+        })
+
+      if (uploadError) throw uploadError
+
+      // Get public URL
+      const imageUrl = getStorageUrl('forum-images', filename)
+
+      // Insert markdown at cursor position with size fragment
+      if (contentTextarea) {
+        const start = contentTextarea.selectionStart
+        const altText = file.name.replace(/\.[^/.]+$/, '') // filename without extension
+        const sizeFragment = size !== 'full' ? `#${size}` : ''
+        const newText = `![${altText}](${imageUrl}${sizeFragment})`
+
+        content = content.substring(0, start) + newText + content.substring(start)
+
+        setTimeout(() => {
+          contentTextarea.focus()
+          const newPosition = start + newText.length
+          contentTextarea.setSelectionRange(newPosition, newPosition)
+        }, 0)
+      }
+    } catch (e) {
+      console.error('Error uploading image:', e)
+      error = 'Failed to upload image. Please try again.'
+    } finally {
+      uploadingImage = false
+      pendingImageFile = null
+    }
+  }
+
+  function cancelImageUpload() {
+    showSizeMenu = false
+    pendingImageFile = null
+  }
+
+  // Header image handlers
+  function handleHeaderImageSelect(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
+    if (!allowedTypes.includes(file.type)) {
+      error = 'Header image must be JPEG, PNG, or WebP'
+      return
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      error = 'Header image must be less than 5MB'
+      return
+    }
+
+    headerImage = file
+    headerImagePreview = URL.createObjectURL(file)
+    error = null
+  }
+
+  function removeHeaderImage() {
+    headerImage = null
+    if (headerImagePreview) {
+      URL.revokeObjectURL(headerImagePreview)
+      headerImagePreview = null
+    }
+    if (headerImageInput) headerImageInput.value = ''
+  }
+
+  async function uploadHeaderImage() {
+    if (!headerImage) return null
+
+    const ext = headerImage.name.split('.').pop()
+    const timestamp = Date.now()
+    const randomId = Math.random().toString(36).substring(2, 8)
+    const filename = `${auth.user.id}/header-${timestamp}-${randomId}.${ext}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('forum-images')
+      .upload(filename, headerImage, {
+        cacheControl: '3600',
+        upsert: false
+      })
+
+    if (uploadError) throw uploadError
+    return filename
   }
 
   // Helper to check if a category is admin-only
@@ -203,6 +398,12 @@
     try {
       const slug = generateUniqueSlug(title)
 
+      // Upload header image if present (for guides)
+      let headerImagePath = null
+      if (headerImage && isGuidesCategory()) {
+        headerImagePath = await uploadHeaderImage()
+      }
+
       const { data, error: postError } = await supabase
         .from('forum_posts')
         .insert({
@@ -210,21 +411,15 @@
           category_id: selectedCategory,
           title: title.trim(),
           slug,
-          content: content.trim()
+          content: content.trim(),
+          header_image: headerImagePath
         })
         .select()
         .single()
 
       if (postError) throw postError
 
-      // Update category post count
-      const category = categories.find(c => c.id === selectedCategory)
-      if (category) {
-        await supabase
-          .from('forum_categories')
-          .update({ post_count: (category.post_count || 0) + 1 })
-          .eq('id', selectedCategory)
-      }
+      // Post count is automatically updated by database trigger
 
       // Navigate to the new post
       onnavigate(`forum-post-${slug}`)
@@ -305,6 +500,51 @@
               <span class="char-count">{title.length}/200</span>
             </div>
 
+            <!-- Header Image (Guides only) -->
+            {#if isGuidesCategory()}
+              <div class="form-group">
+                <label>Header Image <span class="optional">(optional)</span></label>
+                <p class="field-hint">Add a cover image that will display behind your guide title</p>
+
+                {#if headerImagePreview}
+                  <div class="header-image-preview">
+                    <img src={headerImagePreview} alt="Header preview" />
+                    <div class="header-image-overlay">
+                      <span class="preview-title">{title || 'Your Guide Title'}</span>
+                    </div>
+                    <button type="button" class="remove-header-btn" onclick={removeHeaderImage}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  </div>
+                {:else}
+                  <button
+                    type="button"
+                    class="header-image-upload"
+                    onclick={() => headerImageInput?.click()}
+                    disabled={submitting}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                    <span>Click to add header image</span>
+                    <small>Recommended: 1200x400px, max 5MB</small>
+                  </button>
+                {/if}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  class="hidden-file-input"
+                  bind:this={headerImageInput}
+                  onchange={handleHeaderImageSelect}
+                />
+              </div>
+            {/if}
+
             <!-- Content -->
             <div class="form-group">
               <label for="content">Content <span class="required">*</span></label>
@@ -329,6 +569,12 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M17.3 4.9c-2.3-.6-4.4-1-6.2-.9-2.7 0-5.3.7-5.3 3.6 0 1.5 1.8 3.3 3.6 3.9h.2m8.2 0c1.1.5 1.6 1.8 1.6 3.1 0 3.6-3.3 4.5-6.8 4.5-1.3 0-2.6-.1-3.9-.3" />
                       <line x1="4" y1="12" x2="20" y2="12" />
+                    </svg>
+                  </button>
+                  <button type="button" class="toolbar-btn" title="Underline" onclick={() => insertFormat('++')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3" />
+                      <line x1="4" y1="21" x2="20" y2="21" />
                     </svg>
                   </button>
                 </div>
@@ -381,13 +627,52 @@
                       <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                     </svg>
                   </button>
-                  <button type="button" class="toolbar-btn" title="Insert Image" onclick={insertImage}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                      <circle cx="8.5" cy="8.5" r="1.5" />
-                      <polyline points="21 15 16 10 5 21" />
-                    </svg>
-                  </button>
+                  <div class="image-menu-container">
+                    <button
+                      type="button"
+                      class="toolbar-btn"
+                      class:active={showImageMenu}
+                      title="Insert Image"
+                      onclick={toggleImageMenu}
+                      disabled={uploadingImage}
+                    >
+                      {#if uploadingImage}
+                        <div class="toolbar-spinner"></div>
+                      {:else}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                          <circle cx="8.5" cy="8.5" r="1.5" />
+                          <polyline points="21 15 16 10 5 21" />
+                        </svg>
+                      {/if}
+                    </button>
+                    {#if showImageMenu}
+                      <div class="image-menu" onclick={(e) => e.stopPropagation()}>
+                        <button type="button" class="image-menu-item" onclick={triggerImageUpload}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="17 8 12 3 7 8" />
+                            <line x1="12" y1="3" x2="12" y2="15" />
+                          </svg>
+                          Upload Image
+                        </button>
+                        <button type="button" class="image-menu-item" onclick={insertImageUrl}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                          </svg>
+                          Image from URL
+                        </button>
+                      </div>
+                    {/if}
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/gif,image/webp"
+                    class="hidden-file-input"
+                    bind:this={imageFileInput}
+                    onchange={handleImageUpload}
+                  />
                   <button type="button" class="toolbar-btn" title="Quote" onclick={() => insertLineFormat('> ')}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z" />
@@ -398,6 +683,11 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="16 18 22 12 16 6" />
                       <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                  </button>
+                  <button type="button" class="toolbar-btn" title="Horizontal Line" onclick={insertHorizontalRule}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="3" y1="12" x2="21" y2="12" />
                     </svg>
                   </button>
                 </div>
@@ -460,10 +750,42 @@
     </div>
   </main>
 
-  <Footer />
+  <Footer {onnavigate} />
 </div>
 
 <AuthModal bind:open={showAuthModal} onclose={() => showAuthModal = false} />
+
+{#if showSizeMenu}
+  <div class="modal-overlay" onclick={cancelImageUpload}>
+    <div class="size-menu-modal" onclick={(e) => e.stopPropagation()}>
+      <h3 class="size-menu-title">Choose Image Size</h3>
+      <p class="size-menu-subtitle">How large should the image appear?</p>
+      <div class="size-options">
+        <button type="button" class="size-option" onclick={() => insertImageWithSize('small')}>
+          <div class="size-preview size-preview-small"></div>
+          <span class="size-label">Small</span>
+          <span class="size-desc">25% width</span>
+        </button>
+        <button type="button" class="size-option" onclick={() => insertImageWithSize('medium')}>
+          <div class="size-preview size-preview-medium"></div>
+          <span class="size-label">Medium</span>
+          <span class="size-desc">50% width</span>
+        </button>
+        <button type="button" class="size-option" onclick={() => insertImageWithSize('large')}>
+          <div class="size-preview size-preview-large"></div>
+          <span class="size-label">Large</span>
+          <span class="size-desc">75% width</span>
+        </button>
+        <button type="button" class="size-option" onclick={() => insertImageWithSize('full')}>
+          <div class="size-preview size-preview-full"></div>
+          <span class="size-label">Full</span>
+          <span class="size-desc">100% width</span>
+        </button>
+      </div>
+      <button type="button" class="size-cancel" onclick={cancelImageUpload}>Cancel</button>
+    </div>
+  </div>
+{/if}
 
 <style>
   .page {
@@ -596,6 +918,118 @@
     color: #c46b6b;
   }
 
+  .optional {
+    font-weight: 400;
+    color: #6b5a48;
+    font-size: 0.8rem;
+  }
+
+  .field-hint {
+    font-size: 0.8rem;
+    color: #6b5a48;
+    margin: -0.25rem 0 0.5rem 0;
+  }
+
+  /* Header Image Upload */
+  .header-image-upload {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    height: 160px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 2px dashed #4a3f32;
+    border-radius: 8px;
+    color: #8a7a6a;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .header-image-upload:hover:not(:disabled) {
+    border-color: #d4a44c;
+    color: #c4b8a4;
+    background: rgba(212, 164, 76, 0.05);
+  }
+
+  .header-image-upload:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .header-image-upload svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  .header-image-upload span {
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+
+  .header-image-upload small {
+    font-size: 0.75rem;
+    color: #6b5a48;
+  }
+
+  .header-image-preview {
+    position: relative;
+    width: 100%;
+    height: 180px;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .header-image-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .header-image-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.3) 50%, rgba(0, 0, 0, 0.1) 100%);
+    display: flex;
+    align-items: flex-end;
+    padding: 1rem;
+  }
+
+  .preview-title {
+    font-family: 'Cinzel', serif;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #f5d898;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  }
+
+  .remove-header-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    border: none;
+    border-radius: 50%;
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .remove-header-btn:hover {
+    background: rgba(196, 107, 107, 0.8);
+  }
+
+  .remove-header-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
   select,
   input[type="text"],
   textarea {
@@ -709,6 +1143,78 @@
     font-size: 0.75rem;
     font-weight: 700;
     font-family: 'Cinzel', serif;
+  }
+
+  .toolbar-btn.active {
+    background: rgba(212, 164, 76, 0.25);
+    border-color: #d4a44c;
+    color: #d4a44c;
+  }
+
+  .toolbar-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #4a3f32;
+    border-top-color: #d4a44c;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Image Menu */
+  .image-menu-container {
+    position: relative;
+  }
+
+  .image-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 0.25rem;
+    background: linear-gradient(180deg, #2a241c 0%, #1e1a15 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    z-index: 100;
+    min-width: 160px;
+    overflow: hidden;
+  }
+
+  .image-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    background: transparent;
+    border: none;
+    color: #c4b8a4;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+  }
+
+  .image-menu-item:hover {
+    background: rgba(212, 164, 76, 0.15);
+    color: #f0e6d8;
+  }
+
+  .image-menu-item svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  .hidden-file-input {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    pointer-events: none;
   }
 
   .editor-footer {
@@ -865,6 +1371,18 @@
     border: 1px solid #3d3428;
   }
 
+  .markdown-content :global(.md-image-small) {
+    max-width: 25%;
+  }
+
+  .markdown-content :global(.md-image-medium) {
+    max-width: 50%;
+  }
+
+  .markdown-content :global(.md-image-large) {
+    max-width: 75%;
+  }
+
   .markdown-content :global(.code-block) {
     display: block;
     background: rgba(0, 0, 0, 0.4);
@@ -912,6 +1430,18 @@
     list-style-type: decimal;
   }
 
+  .markdown-content :global(u) {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .markdown-content :global(.md-divider) {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #4a3f32 20%, #4a3f32 80%, transparent);
+    margin: 1.5rem 0;
+  }
+
   .error-message {
     padding: 0.75rem 1rem;
     background: rgba(196, 107, 107, 0.15);
@@ -926,5 +1456,122 @@
     justify-content: flex-end;
     gap: 1rem;
     padding-top: 0.5rem;
+  }
+
+  /* Size Selection Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+  }
+
+  .size-menu-modal {
+    background: linear-gradient(180deg, #2a241c 0%, #1e1a15 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 8px;
+    padding: 1.5rem;
+    max-width: 400px;
+    width: 100%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  .size-menu-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #f5d898;
+    margin: 0 0 0.25rem 0;
+  }
+
+  .size-menu-subtitle {
+    font-size: 0.85rem;
+    color: #8a7a6a;
+    margin: 0 0 1.25rem 0;
+  }
+
+  .size-options {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .size-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 0.5rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #3d3428;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .size-option:hover {
+    background: rgba(212, 164, 76, 0.15);
+    border-color: #d4a44c;
+  }
+
+  .size-preview {
+    height: 40px;
+    background: linear-gradient(135deg, #4a3f32 0%, #3d3428 100%);
+    border-radius: 3px;
+  }
+
+  .size-preview-small {
+    width: 20px;
+  }
+
+  .size-preview-medium {
+    width: 35px;
+  }
+
+  .size-preview-large {
+    width: 50px;
+  }
+
+  .size-preview-full {
+    width: 65px;
+  }
+
+  .size-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #c4b8a4;
+  }
+
+  .size-desc {
+    font-size: 0.7rem;
+    color: #6b5a48;
+  }
+
+  .size-cancel {
+    width: 100%;
+    padding: 0.625rem 1rem;
+    background: transparent;
+    border: 1px solid #4a3f32;
+    border-radius: 6px;
+    color: #a89880;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .size-cancel:hover {
+    background: rgba(0, 0, 0, 0.3);
+    border-color: #6b5a48;
+    color: #c4b8a4;
+  }
+
+  @media (max-width: 400px) {
+    .size-options {
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
 </style>
