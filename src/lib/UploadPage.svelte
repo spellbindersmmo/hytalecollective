@@ -57,7 +57,7 @@
             <h2>Upload Successful!</h2>
             <p>Your {uploadedItem?.content_type || 'content'} "{uploadedItem?.title}" has been uploaded.</p>
             <div class="success-actions">
-              <button class="view-btn" onclick={() => onnavigate(`/${uploadedItem?.content_type || 'build'}s/${uploadedItem?.slug}`)}>
+              <button class="view-btn" onclick={() => onnavigate(`${uploadedItem?.content_type || 'build'}-${uploadedItem?.slug}`)}>
                 View Upload
               </button>
               <button class="another-btn" onclick={handleUploadAnother}>

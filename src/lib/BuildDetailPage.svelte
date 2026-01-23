@@ -4,7 +4,7 @@
   import Panel from './Panel.svelte'
   import Button from './Button.svelte'
   import { auth } from './stores/auth.svelte.js'
-  import { fetchBuildBySlug, recordDownload } from './stores/data.svelte.js'
+  import { fetchBuildBySlug, recordDownload, deleteBuild } from './stores/data.svelte.js'
 
   let { buildSlug = '', onnavigate = () => {} } = $props()
 
@@ -13,6 +13,13 @@
   let loading = $state(true)
   let error = $state(null)
   let downloading = $state(false)
+  let showDeleteConfirm = $state(false)
+  let deleting = $state(false)
+
+  // Check if current user is the author
+  const isAuthor = $derived(
+    auth.isAuthenticated && build?.author?.id === auth.user?.id
+  )
 
   $effect(() => {
     if (buildSlug) {
@@ -31,6 +38,22 @@
       error = 'Build not found'
     } finally {
       loading = false
+    }
+  }
+
+  async function handleDelete() {
+    if (!build || deleting) return
+
+    deleting = true
+    try {
+      await deleteBuild(build.id, build.file_path, build.thumbnail_path)
+      // Navigate back to builds page
+      onnavigate('builds')
+    } catch (e) {
+      console.error('Error deleting build:', e)
+      error = 'Failed to delete build'
+      deleting = false
+      showDeleteConfirm = false
     }
   }
 
@@ -282,6 +305,23 @@
                 </div>
               </Panel>
             {/if}
+
+            {#if isAuthor}
+              <Panel>
+                <div class="manage-section">
+                  <h3 class="section-label">Manage</h3>
+                  <button class="delete-btn" onclick={() => showDeleteConfirm = true}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      <line x1="10" y1="11" x2="10" y2="17" />
+                      <line x1="14" y1="11" x2="14" y2="17" />
+                    </svg>
+                    Delete Build
+                  </button>
+                </div>
+              </Panel>
+            {/if}
           </aside>
         </div>
       {/if}
@@ -290,6 +330,25 @@
 
   <Footer />
 </div>
+
+{#if showDeleteConfirm}
+  <div class="modal-overlay" onclick={() => showDeleteConfirm = false}>
+    <div class="modal-content" onclick={(e) => e.stopPropagation()}>
+      <h3 class="modal-title">Delete Build</h3>
+      <p class="modal-text">
+        Are you sure you want to delete "{build?.title}"? This action cannot be undone.
+      </p>
+      <div class="modal-actions">
+        <button class="cancel-btn" onclick={() => showDeleteConfirm = false} disabled={deleting}>
+          Cancel
+        </button>
+        <button class="confirm-delete-btn" onclick={handleDelete} disabled={deleting}>
+          {deleting ? 'Deleting...' : 'Delete'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .page {
@@ -677,5 +736,123 @@
   .error-state p {
     color: #8a7a6a;
     margin: 0 0 1.5rem 0;
+  }
+
+  /* Manage Section */
+  .manage-section {
+    padding: 0.5rem;
+  }
+
+  .delete-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: linear-gradient(180deg, #5a3030 0%, #4a2525 100%);
+    border: 1px solid #6a4040;
+    border-radius: 6px;
+    color: #e8b8b8;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .delete-btn:hover {
+    background: linear-gradient(180deg, #6a3a3a 0%, #5a3030 100%);
+    border-color: #8a5050;
+    color: #f0d0d0;
+  }
+
+  .delete-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+  }
+
+  .modal-content {
+    background: linear-gradient(180deg, #2a241c 0%, #1e1a15 100%);
+    border: 1px solid #3d3428;
+    border-radius: 8px;
+    padding: 1.5rem;
+    max-width: 400px;
+    width: 100%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  .modal-title {
+    font-size: 1.25rem;
+    color: #f5d898;
+    margin: 0 0 1rem 0;
+  }
+
+  .modal-text {
+    font-size: 0.95rem;
+    color: #c4b8a4;
+    line-height: 1.5;
+    margin: 0 0 1.5rem 0;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+  }
+
+  .cancel-btn {
+    padding: 0.6rem 1.25rem;
+    background: linear-gradient(180deg, #4d4235 0%, #3a3127 100%);
+    border: 1px solid #6b5a48;
+    border-radius: 6px;
+    color: #f0e6d8;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .cancel-btn:hover:not(:disabled) {
+    background: linear-gradient(180deg, #5a4d3e 0%, #453a2e 100%);
+    border-color: #9c8465;
+  }
+
+  .cancel-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .confirm-delete-btn {
+    padding: 0.6rem 1.25rem;
+    background: linear-gradient(180deg, #8a3535 0%, #6a2525 100%);
+    border: 1px solid #a04545;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .confirm-delete-btn:hover:not(:disabled) {
+    background: linear-gradient(180deg, #a04545 0%, #8a3535 100%);
+    border-color: #c05555;
+  }
+
+  .confirm-delete-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 </style>

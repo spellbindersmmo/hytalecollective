@@ -9,6 +9,7 @@
 
   // Form state
   let contentType = $state('build') // 'build' | 'world'
+  let buildType = $state('prefab') // 'prefab' | 'structure' | 'schematic'
   let title = $state('')
   let description = $state('')
   let selectedTags = $state([])
@@ -19,25 +20,41 @@
   let thumbnail = $state(null)
   let thumbnailPreview = $state(null)
 
+  // Parsed metadata from prefab JSON
+  let prefabMetadata = $state(null)
+
   // UI state
   let loading = $state(false)
   let error = $state(null)
   let uploadProgress = $state(0)
   let dragOver = $state(false)
   let availableTags = $state([])
+  let parsingFile = $state(false)
 
-  // File size limits
+  // File size limits (Supabase free tier has 50MB limit)
   const FILE_LIMITS = {
-    build: 100 * 1024 * 1024, // 100MB
-    world: 1024 * 1024 * 1024 // 1GB
+    build: 50 * 1024 * 1024, // 50MB
+    world: 50 * 1024 * 1024 // 50MB (upgrade Supabase for larger)
   }
 
   const THUMBNAIL_LIMIT = 5 * 1024 * 1024 // 5MB
 
   const ALLOWED_FILE_TYPES = {
-    build: ['application/json', 'application/zip', 'application/x-zip-compressed'],
+    build: ['application/json', 'application/zip', 'application/x-zip-compressed', 'application/octet-stream'],
     world: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream']
   }
+
+  // Valid file extensions by build type
+  const BUILD_TYPE_EXTENSIONS = {
+    prefab: ['.json', '.prefab.json'],
+    structure: ['.json', '.zip']
+  }
+
+  // Build type options
+  const buildTypeOptions = [
+    { value: 'prefab', label: 'Prefab', description: 'Hytale prefab JSON file' },
+    { value: 'structure', label: 'Structure Pack', description: 'Zipped structure with assets' }
+  ]
 
   const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
@@ -75,14 +92,30 @@
     }
   }
 
-  function validateAndSetFile(selectedFile) {
+  async function validateAndSetFile(selectedFile) {
     error = null
+    prefabMetadata = null
 
-    // Check file type
-    const allowedTypes = ALLOWED_FILE_TYPES[contentType]
-    if (!allowedTypes.includes(selectedFile.type) && !selectedFile.name.endsWith('.json') && !selectedFile.name.endsWith('.zip')) {
-      error = `Invalid file type. Please upload a ${contentType === 'build' ? 'JSON or ZIP' : 'ZIP'} file.`
-      return
+    // Check file type based on content type and build type
+    const fileName = selectedFile.name.toLowerCase()
+    let isValidExtension = false
+
+    if (contentType === 'build') {
+      const validExtensions = BUILD_TYPE_EXTENSIONS[buildType]
+      isValidExtension = validExtensions.some(ext => fileName.endsWith(ext))
+
+      if (!isValidExtension) {
+        const extList = validExtensions.join(', ')
+        error = `Invalid file type for ${buildType}. Expected: ${extList}`
+        return
+      }
+    } else {
+      // World uploads must be ZIP
+      isValidExtension = fileName.endsWith('.zip')
+      if (!isValidExtension) {
+        error = 'World saves must be uploaded as ZIP files.'
+        return
+      }
     }
 
     // Check file size
@@ -93,6 +126,70 @@
     }
 
     file = selectedFile
+
+    // Parse JSON prefabs to extract metadata
+    if (contentType === 'build' && buildType === 'prefab' && fileName.endsWith('.json')) {
+      await parsePrefabJson(selectedFile)
+    }
+  }
+
+  async function parsePrefabJson(jsonFile) {
+    parsingFile = true
+    try {
+      const text = await jsonFile.text()
+      const data = JSON.parse(text)
+
+      // Extract metadata from Hytale prefab format
+      // The structure may vary, but we'll try common patterns
+      const metadata = {
+        valid: true,
+        name: data.name || data.prefabName || null,
+        dimensions: null,
+        blockCount: 0,
+        hasEntities: false,
+        components: []
+      }
+
+      // Try to extract dimensions
+      if (data.size) {
+        metadata.dimensions = `${data.size.x || data.size[0] || '?'} x ${data.size.y || data.size[1] || '?'} x ${data.size.z || data.size[2] || '?'}`
+      } else if (data.dimensions) {
+        metadata.dimensions = `${data.dimensions.width || '?'} x ${data.dimensions.height || '?'} x ${data.dimensions.depth || '?'}`
+      } else if (data.width && data.height && data.depth) {
+        metadata.dimensions = `${data.width} x ${data.height} x ${data.depth}`
+      }
+
+      // Try to count blocks
+      if (data.blocks && Array.isArray(data.blocks)) {
+        metadata.blockCount = data.blocks.length
+      } else if (data.palette && data.blockData) {
+        // Some formats use palette + block data
+        metadata.blockCount = data.blockData.length
+      }
+
+      // Check for entities
+      if (data.entities && Array.isArray(data.entities)) {
+        metadata.hasEntities = data.entities.length > 0
+      }
+
+      // Extract components if available
+      if (data.components && Array.isArray(data.components)) {
+        metadata.components = data.components.map(c => c.type || c.name || 'Unknown').slice(0, 5)
+      }
+
+      // Auto-fill title if empty and prefab has a name
+      if (!title && metadata.name) {
+        title = metadata.name
+      }
+
+      prefabMetadata = metadata
+    } catch (e) {
+      console.error('Error parsing prefab JSON:', e)
+      error = 'Invalid JSON file. Please ensure it\'s a valid Hytale prefab.'
+      file = null
+    } finally {
+      parsingFile = false
+    }
   }
 
   function handleThumbnailSelect(e) {
@@ -131,10 +228,6 @@
     }
   }
 
-  function removeFile() {
-    file = null
-  }
-
   function removeThumbnail() {
     thumbnail = null
     thumbnailPreview = null
@@ -169,14 +262,40 @@
 
       // Upload main file
       uploadProgress = 10
-      const fileExt = file.name.split('.').pop()
+      const fileExt = file.name.split('.').pop().toLowerCase()
       const filePath = `${userId}/${slug}-${timestamp}.${fileExt}`
 
-      const { error: fileError } = await supabase.storage
-        .from(contentType === 'build' ? 'builds' : 'worlds')
-        .upload(filePath, file)
+      // Determine content type for upload
+      let contentTypeHeader = file.type
+      if (fileExt === 'zip') {
+        contentTypeHeader = 'application/zip'
+      } else if (fileExt === 'json') {
+        contentTypeHeader = 'application/json'
+      }
 
-      if (fileError) throw fileError
+      const bucketName = contentType === 'build' ? 'builds' : 'worlds'
+      console.log('Uploading file:', { bucketName, filePath, size: file.size, type: contentTypeHeader })
+
+      // Add timeout for upload
+      const uploadPromise = supabase.storage
+        .from(bucketName)
+        .upload(filePath, file, {
+          contentType: contentTypeHeader,
+          upsert: false
+        })
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Upload timed out after 60 seconds. Check if the storage bucket exists and has correct permissions.')), 60000)
+      )
+
+      const { error: fileError, data: fileData } = await Promise.race([uploadPromise, timeoutPromise])
+
+      console.log('Upload result:', { fileData, fileError })
+
+      if (fileError) {
+        console.error('File upload error:', fileError)
+        throw new Error(`Upload failed: ${fileError.message}`)
+      }
       uploadProgress = 50
 
       // Upload thumbnail if provided
@@ -209,6 +328,17 @@
 
       if (contentType === 'build') {
         record.content_type = 'build'
+        record.build_type = buildType
+
+        // Add parsed metadata if available
+        if (prefabMetadata) {
+          if (prefabMetadata.blockCount > 0) {
+            record.block_count = prefabMetadata.blockCount
+          }
+          if (prefabMetadata.dimensions) {
+            record.dimensions = prefabMetadata.dimensions
+          }
+        }
       }
 
       const { data: insertedRecord, error: dbError } = await supabase
@@ -258,6 +388,13 @@
     thumbnail = null
     thumbnailPreview = null
     uploadProgress = 0
+    prefabMetadata = null
+    buildType = 'prefab'
+  }
+
+  function removeFile() {
+    file = null
+    prefabMetadata = null
   }
 </script>
 
@@ -270,7 +407,7 @@
         type="button"
         class="type-btn"
         class:active={contentType === 'build'}
-        onclick={() => { contentType = 'build'; file = null; }}
+        onclick={() => { contentType = 'build'; file = null; prefabMetadata = null; }}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
@@ -285,7 +422,7 @@
         type="button"
         class="type-btn"
         class:active={contentType === 'world'}
-        onclick={() => { contentType = 'world'; file = null; }}
+        onclick={() => { contentType = 'world'; file = null; prefabMetadata = null; }}
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="10" />
@@ -297,6 +434,28 @@
       </button>
     </div>
   </div>
+
+  <!-- Build Type Selection (only for builds) -->
+  {#if contentType === 'build'}
+    <div class="form-section">
+      <label class="section-label">Build Format</label>
+      <div class="build-type-options">
+        {#each buildTypeOptions as option}
+          <label class="build-type-option" class:selected={buildType === option.value}>
+            <input
+              type="radio"
+              name="buildType"
+              value={option.value}
+              checked={buildType === option.value}
+              onchange={() => { buildType = option.value; file = null; prefabMetadata = null; }}
+            />
+            <span class="option-label">{option.label}</span>
+            <small class="option-desc">{option.description}</small>
+          </label>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   <!-- File Upload -->
   <div class="form-section">
@@ -324,6 +483,44 @@
           </svg>
         </button>
       </div>
+
+      <!-- Show parsed prefab metadata -->
+      {#if parsingFile}
+        <div class="metadata-loading">
+          <span class="spinner-small"></span>
+          Analyzing prefab...
+        </div>
+      {:else if prefabMetadata}
+        <div class="metadata-card">
+          <h4>Prefab Information</h4>
+          <div class="metadata-grid">
+            {#if prefabMetadata.dimensions}
+              <div class="metadata-item">
+                <span class="meta-label">Dimensions</span>
+                <span class="meta-value">{prefabMetadata.dimensions}</span>
+              </div>
+            {/if}
+            {#if prefabMetadata.blockCount > 0}
+              <div class="metadata-item">
+                <span class="meta-label">Blocks</span>
+                <span class="meta-value">{prefabMetadata.blockCount.toLocaleString()}</span>
+              </div>
+            {/if}
+            {#if prefabMetadata.hasEntities}
+              <div class="metadata-item">
+                <span class="meta-label">Entities</span>
+                <span class="meta-value">Yes</span>
+              </div>
+            {/if}
+            {#if prefabMetadata.components.length > 0}
+              <div class="metadata-item full-width">
+                <span class="meta-label">Components</span>
+                <span class="meta-value">{prefabMetadata.components.join(', ')}</span>
+              </div>
+            {/if}
+          </div>
+        </div>
+      {/if}
     {:else}
       <div
         class="dropzone"
@@ -342,13 +539,17 @@
           Browse Files
           <input
             type="file"
-            accept={contentType === 'build' ? '.json,.zip' : '.zip'}
+            accept={contentType === 'build' ? BUILD_TYPE_EXTENSIONS[buildType].join(',') : '.zip'}
             onchange={handleFileSelect}
             hidden
           />
         </label>
         <small>
-          {contentType === 'build' ? 'JSON or ZIP' : 'ZIP'} files up to {formatFileSize(FILE_LIMITS[contentType])}
+          {#if contentType === 'build'}
+            {BUILD_TYPE_EXTENSIONS[buildType].join(', ')} files up to {formatFileSize(FILE_LIMITS[contentType])}
+          {:else}
+            ZIP files up to {formatFileSize(FILE_LIMITS[contentType])}
+          {/if}
         </small>
       </div>
     {/if}
@@ -834,5 +1035,127 @@
     justify-content: flex-end;
     padding-top: 1rem;
     border-top: 1px solid #3d3428;
+  }
+
+  /* Build Type Options */
+  .build-type-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .build-type-option {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid #3d3428;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex: 1;
+    min-width: 140px;
+  }
+
+  .build-type-option:hover {
+    background: rgba(60, 50, 40, 0.3);
+    border-color: #4a3f32;
+  }
+
+  .build-type-option.selected {
+    background: rgba(212, 164, 76, 0.1);
+    border-color: #d4a44c;
+  }
+
+  .build-type-option input {
+    display: none;
+  }
+
+  .option-label {
+    font-weight: 600;
+    color: #c4b8a4;
+    font-size: 0.9rem;
+  }
+
+  .build-type-option.selected .option-label {
+    color: #f5d898;
+  }
+
+  .option-desc {
+    font-size: 0.75rem;
+    color: #8a7a6a;
+  }
+
+  /* Metadata Card */
+  .metadata-card {
+    margin-top: 0.75rem;
+    padding: 1rem;
+    background: rgba(107, 184, 204, 0.1);
+    border: 1px solid rgba(107, 184, 204, 0.3);
+    border-radius: 6px;
+  }
+
+  .metadata-card h4 {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #6bb8cc;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .metadata-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .metadata-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .metadata-item.full-width {
+    grid-column: 1 / -1;
+  }
+
+  .meta-label {
+    font-size: 0.7rem;
+    color: #8a7a6a;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .meta-value {
+    font-size: 0.9rem;
+    color: #f0e6d8;
+    font-weight: 500;
+  }
+
+  .metadata-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    color: #8a7a6a;
+    font-size: 0.85rem;
+  }
+
+  .spinner-small {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #3d3428;
+    border-top-color: #6bb8cc;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 </style>
