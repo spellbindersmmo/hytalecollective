@@ -19,6 +19,122 @@
   let submitting = $state(false)
   let error = $state(null)
   let showAuthModal = $state(false)
+  let contentTextarea = $state(null)
+  let showPreview = $state(false)
+
+  // Markdown renderer
+  function renderMarkdown(text) {
+    if (!text) return '<span class="empty-preview">Preview will appear here...</span>'
+
+    let html = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/```([\s\S]*?)```/g, '<pre class="code-block">$1</pre>')
+      .replace(/^### (.+)$/gm, '<h4 class="md-h3">$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3 class="md-h2">$1</h3>')
+      .replace(/^# (.+)$/gm, '<h2 class="md-h1">$1</h2>')
+      .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/~~(.+?)~~/g, '<del>$1</del>')
+      .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-image" />')
+      .replace(/^&gt; (.+)$/gm, '<blockquote class="md-quote">$1</blockquote>')
+      .replace(/^- (.+)$/gm, '<li class="md-bullet">$1</li>')
+      .replace(/^\d+\. (.+)$/gm, '<li class="md-numbered">$1</li>')
+      .replace(/\n/g, '<br />')
+
+    return html
+  }
+
+  // Formatting functions
+  function insertFormat(before, after = before) {
+    if (!contentTextarea) return
+
+    const start = contentTextarea.selectionStart
+    const end = contentTextarea.selectionEnd
+    const selectedText = content.substring(start, end)
+    const newText = before + selectedText + after
+
+    content = content.substring(0, start) + newText + content.substring(end)
+
+    // Set cursor position after formatting
+    setTimeout(() => {
+      contentTextarea.focus()
+      if (selectedText) {
+        contentTextarea.setSelectionRange(start + before.length, end + before.length)
+      } else {
+        contentTextarea.setSelectionRange(start + before.length, start + before.length)
+      }
+    }, 0)
+  }
+
+  function insertLineFormat(prefix) {
+    if (!contentTextarea) return
+
+    const start = contentTextarea.selectionStart
+    const end = contentTextarea.selectionEnd
+    const selectedText = content.substring(start, end)
+
+    // Find line start
+    const beforeSelection = content.substring(0, start)
+    const lineStart = beforeSelection.lastIndexOf('\n') + 1
+
+    if (selectedText.includes('\n')) {
+      // Multi-line: add prefix to each line
+      const lines = selectedText.split('\n')
+      const formatted = lines.map(line => prefix + line).join('\n')
+      content = content.substring(0, start) + formatted + content.substring(end)
+    } else {
+      // Single line: add prefix at line start
+      content = content.substring(0, lineStart) + prefix + content.substring(lineStart)
+    }
+
+    setTimeout(() => {
+      contentTextarea.focus()
+    }, 0)
+  }
+
+  function insertLink() {
+    if (!contentTextarea) return
+
+    const start = contentTextarea.selectionStart
+    const end = contentTextarea.selectionEnd
+    const selectedText = content.substring(start, end)
+
+    const linkText = selectedText || 'link text'
+    const newText = `[${linkText}](url)`
+
+    content = content.substring(0, start) + newText + content.substring(end)
+
+    setTimeout(() => {
+      contentTextarea.focus()
+      // Select "url" for easy replacement
+      const urlStart = start + linkText.length + 3
+      contentTextarea.setSelectionRange(urlStart, urlStart + 3)
+    }, 0)
+  }
+
+  function insertImage() {
+    if (!contentTextarea) return
+
+    const start = contentTextarea.selectionStart
+    const end = contentTextarea.selectionEnd
+    const selectedText = content.substring(start, end)
+
+    const altText = selectedText || 'image description'
+    const newText = `![${altText}](image-url)`
+
+    content = content.substring(0, start) + newText + content.substring(end)
+
+    setTimeout(() => {
+      contentTextarea.focus()
+      const urlStart = start + altText.length + 4
+      contentTextarea.setSelectionRange(urlStart, urlStart + 9)
+    }, 0)
+  }
 
   // Helper to check if a category is admin-only
   function isAdminOnlyCategory(category) {
@@ -192,16 +308,138 @@
             <!-- Content -->
             <div class="form-group">
               <label for="content">Content <span class="required">*</span></label>
-              <textarea
-                id="content"
-                bind:value={content}
-                placeholder="Write your post content here..."
-                rows="10"
-                maxlength="10000"
-                disabled={submitting}
-                required
-              ></textarea>
-              <span class="char-count">{content.length}/10000</span>
+
+              <!-- Formatting Toolbar -->
+              <div class="editor-toolbar">
+                <div class="toolbar-group">
+                  <button type="button" class="toolbar-btn" title="Bold (Ctrl+B)" onclick={() => insertFormat('**')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z" />
+                      <path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z" />
+                    </svg>
+                  </button>
+                  <button type="button" class="toolbar-btn" title="Italic (Ctrl+I)" onclick={() => insertFormat('*')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="19" y1="4" x2="10" y2="4" />
+                      <line x1="14" y1="20" x2="5" y2="20" />
+                      <line x1="15" y1="4" x2="9" y2="20" />
+                    </svg>
+                  </button>
+                  <button type="button" class="toolbar-btn" title="Strikethrough" onclick={() => insertFormat('~~')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M17.3 4.9c-2.3-.6-4.4-1-6.2-.9-2.7 0-5.3.7-5.3 3.6 0 1.5 1.8 3.3 3.6 3.9h.2m8.2 0c1.1.5 1.6 1.8 1.6 3.1 0 3.6-3.3 4.5-6.8 4.5-1.3 0-2.6-.1-3.9-.3" />
+                      <line x1="4" y1="12" x2="20" y2="12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div class="toolbar-divider"></div>
+
+                <div class="toolbar-group">
+                  <button type="button" class="toolbar-btn" title="Heading 1" onclick={() => insertLineFormat('# ')}>
+                    <span class="toolbar-text">H1</span>
+                  </button>
+                  <button type="button" class="toolbar-btn" title="Heading 2" onclick={() => insertLineFormat('## ')}>
+                    <span class="toolbar-text">H2</span>
+                  </button>
+                  <button type="button" class="toolbar-btn" title="Heading 3" onclick={() => insertLineFormat('### ')}>
+                    <span class="toolbar-text">H3</span>
+                  </button>
+                </div>
+
+                <div class="toolbar-divider"></div>
+
+                <div class="toolbar-group">
+                  <button type="button" class="toolbar-btn" title="Bullet List" onclick={() => insertLineFormat('- ')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="9" y1="6" x2="20" y2="6" />
+                      <line x1="9" y1="12" x2="20" y2="12" />
+                      <line x1="9" y1="18" x2="20" y2="18" />
+                      <circle cx="4" cy="6" r="1.5" fill="currentColor" />
+                      <circle cx="4" cy="12" r="1.5" fill="currentColor" />
+                      <circle cx="4" cy="18" r="1.5" fill="currentColor" />
+                    </svg>
+                  </button>
+                  <button type="button" class="toolbar-btn" title="Numbered List" onclick={() => insertLineFormat('1. ')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="10" y1="6" x2="21" y2="6" />
+                      <line x1="10" y1="12" x2="21" y2="12" />
+                      <line x1="10" y1="18" x2="21" y2="18" />
+                      <text x="3" y="8" font-size="6" fill="currentColor" font-family="sans-serif">1</text>
+                      <text x="3" y="14" font-size="6" fill="currentColor" font-family="sans-serif">2</text>
+                      <text x="3" y="20" font-size="6" fill="currentColor" font-family="sans-serif">3</text>
+                    </svg>
+                  </button>
+                </div>
+
+                <div class="toolbar-divider"></div>
+
+                <div class="toolbar-group">
+                  <button type="button" class="toolbar-btn" title="Insert Link" onclick={insertLink}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                    </svg>
+                  </button>
+                  <button type="button" class="toolbar-btn" title="Insert Image" onclick={insertImage}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                  </button>
+                  <button type="button" class="toolbar-btn" title="Quote" onclick={() => insertLineFormat('> ')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z" />
+                      <path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3z" />
+                    </svg>
+                  </button>
+                  <button type="button" class="toolbar-btn" title="Code Block" onclick={() => insertFormat('```\n', '\n```')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="16 18 22 12 16 6" />
+                      <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div class="toolbar-spacer"></div>
+
+                <button
+                  type="button"
+                  class="preview-toggle"
+                  class:active={showPreview}
+                  onclick={() => showPreview = !showPreview}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  {showPreview ? 'Edit' : 'Preview'}
+                </button>
+              </div>
+
+              {#if showPreview}
+                <div class="preview-pane">
+                  <div class="preview-content markdown-content">
+                    {@html renderMarkdown(content)}
+                  </div>
+                </div>
+              {:else}
+                <textarea
+                  id="content"
+                  bind:value={content}
+                  bind:this={contentTextarea}
+                  placeholder="Write your post content here... Supports Markdown formatting."
+                  rows="12"
+                  maxlength="10000"
+                  disabled={submitting}
+                  required
+                ></textarea>
+              {/if}
+              <div class="editor-footer">
+                <span class="format-hint">{showPreview ? 'Preview mode' : 'Supports Markdown formatting'}</span>
+                <span class="char-count">{content.length}/10000</span>
+              </div>
             </div>
 
             {#if error}
@@ -381,6 +619,11 @@
     padding-right: 2.5rem;
   }
 
+  select option {
+    background: #2a241c;
+    color: #f0e6d8;
+  }
+
   select:focus,
   input[type="text"]:focus,
   textarea:focus {
@@ -404,14 +647,269 @@
     resize: vertical;
     min-height: 200px;
     line-height: 1.6;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+
+  /* Editor Toolbar */
+  .editor-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid #4a3f32;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+  }
+
+  .toolbar-group {
+    display: flex;
+    gap: 0.125rem;
+  }
+
+  .toolbar-divider {
+    width: 1px;
+    height: 24px;
+    background: #4a3f32;
+    margin: 0 0.375rem;
+  }
+
+  .toolbar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: #a89880;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .toolbar-btn:hover {
+    background: rgba(212, 164, 76, 0.15);
+    border-color: #4a3f32;
+    color: #d4a44c;
+  }
+
+  .toolbar-btn:active {
+    background: rgba(212, 164, 76, 0.25);
+  }
+
+  .toolbar-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .toolbar-text {
+    font-size: 0.75rem;
+    font-weight: 700;
+    font-family: 'Cinzel', serif;
+  }
+
+  .editor-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 0.5rem;
+  }
+
+  .format-hint {
+    font-size: 0.75rem;
+    color: #6b5a48;
   }
 
   .char-count {
-    position: absolute;
-    right: 0;
-    top: 0;
     font-size: 0.75rem;
     color: #6b5a48;
+  }
+
+  @media (max-width: 640px) {
+    .editor-toolbar {
+      gap: 0.125rem;
+      padding: 0.375rem;
+    }
+
+    .toolbar-divider {
+      display: none;
+    }
+
+    .toolbar-btn {
+      width: 28px;
+      height: 28px;
+    }
+
+    .toolbar-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .toolbar-spacer {
+      display: none;
+    }
+
+    .preview-toggle {
+      margin-left: 0.25rem;
+    }
+  }
+
+  .toolbar-spacer {
+    flex: 1;
+  }
+
+  .preview-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.75rem;
+    background: transparent;
+    border: 1px solid #4a3f32;
+    border-radius: 4px;
+    color: #a89880;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .preview-toggle:hover {
+    background: rgba(212, 164, 76, 0.15);
+    border-color: #6b5a48;
+    color: #d4a44c;
+  }
+
+  .preview-toggle.active {
+    background: rgba(212, 164, 76, 0.2);
+    border-color: #d4a44c;
+    color: #d4a44c;
+  }
+
+  .preview-toggle svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* Preview Pane */
+  .preview-pane {
+    min-height: 250px;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #4a3f32;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+  }
+
+  .preview-content {
+    color: #c4b8a4;
+    line-height: 1.7;
+  }
+
+  .preview-content :global(.empty-preview) {
+    color: #6b5a48;
+    font-style: italic;
+  }
+
+  /* Markdown Styles */
+  .markdown-content :global(h2.md-h1) {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #f5d898;
+    margin: 0.5rem 0;
+  }
+
+  .markdown-content :global(h3.md-h2) {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #f0e6d8;
+    margin: 0.5rem 0;
+  }
+
+  .markdown-content :global(h4.md-h3) {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #e0d6c8;
+    margin: 0.35rem 0;
+  }
+
+  .markdown-content :global(strong) {
+    font-weight: 700;
+    color: #f0e6d8;
+  }
+
+  .markdown-content :global(em) {
+    font-style: italic;
+  }
+
+  .markdown-content :global(del) {
+    text-decoration: line-through;
+    opacity: 0.7;
+  }
+
+  .markdown-content :global(a) {
+    color: #6bb8cc;
+    text-decoration: none;
+  }
+
+  .markdown-content :global(a:hover) {
+    text-decoration: underline;
+  }
+
+  .markdown-content :global(.md-image) {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    margin: 0.5rem 0;
+    border: 1px solid #3d3428;
+  }
+
+  .markdown-content :global(.code-block) {
+    display: block;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid #3d3428;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    margin: 0.5rem 0;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.85rem;
+    color: #d4d4d4;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .markdown-content :global(.inline-code) {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid #3d3428;
+    border-radius: 3px;
+    padding: 0.1rem 0.4rem;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.85em;
+    color: #e8c36b;
+  }
+
+  .markdown-content :global(.md-quote) {
+    border-left: 3px solid #d4a44c;
+    padding-left: 1rem;
+    margin: 0.5rem 0;
+    color: #a89880;
+    font-style: italic;
+  }
+
+  .markdown-content :global(li.md-bullet),
+  .markdown-content :global(li.md-numbered) {
+    display: list-item;
+    margin-left: 1.5rem;
+    padding: 0.1rem 0;
+  }
+
+  .markdown-content :global(li.md-bullet) {
+    list-style-type: disc;
+  }
+
+  .markdown-content :global(li.md-numbered) {
+    list-style-type: decimal;
   }
 
   .error-message {

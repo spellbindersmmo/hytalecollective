@@ -27,17 +27,25 @@
   // Debounced search
   let searchTimeout = null
 
+  // Timeout wrapper
+  function withTimeout(promise, ms = 10000) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), ms))
+    ])
+  }
+
   async function loadServers() {
     loading = true
     try {
-      const result = await fetchServers({
+      const result = await withTimeout(fetchServers({
         page: currentPage,
         limit,
         status: statusFilter !== 'all' ? statusFilter : null,
         tag: tagFilter || null,
         search: search || null,
         sortBy
-      })
+      }))
       servers = result.servers
       totalServers = result.total
     } catch (e) {
@@ -381,6 +389,11 @@
   .filter-group select:focus {
     outline: none;
     border-color: #6bb8cc;
+  }
+
+  .filter-group select option {
+    background: #2a241c;
+    color: #f0e6d8;
   }
 
   /* Results */
