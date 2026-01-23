@@ -4,7 +4,7 @@
   import Panel from './Panel.svelte'
   import Button from './Button.svelte'
   import { auth } from './stores/auth.svelte.js'
-  import { fetchBuildBySlug, recordDownload, deleteBuild } from './stores/data.svelte.js'
+  import { fetchBuildBySlug, recordDownload, deleteBuild, updateBuild, updateBuildTags, fetchAllTags } from './stores/data.svelte.js'
 
   let { buildSlug = '', onnavigate = () => {} } = $props()
 
@@ -15,6 +15,14 @@
   let downloading = $state(false)
   let showDeleteConfirm = $state(false)
   let deleting = $state(false)
+
+  // Edit state
+  let editing = $state(false)
+  let editTitle = $state('')
+  let editDescription = $state('')
+  let editTags = $state([])
+  let availableTags = $state([])
+  let saving = $state(false)
 
   // Check if current user is the author or admin
   const isAuthor = $derived(
@@ -27,6 +35,15 @@
       loadBuild()
     }
   })
+
+  async function loadTags() {
+    if (availableTags.length > 0) return // Already loaded
+    try {
+      availableTags = await fetchAllTags()
+    } catch (e) {
+      console.error('Error loading tags:', e)
+    }
+  }
 
   async function loadBuild() {
     loading = true
@@ -77,6 +94,63 @@
       console.error('Error downloading:', e)
     } finally {
       downloading = false
+    }
+  }
+
+  async function startEditing() {
+    editTitle = build.title
+    editDescription = build.description || ''
+    // Initialize editTags with current tag IDs
+    editTags = build.tags ? build.tags.map(t => t.id) : []
+    editing = true
+    // Load tags for editing (only fetches once)
+    await loadTags()
+  }
+
+  function cancelEditing() {
+    editing = false
+    editTitle = ''
+    editDescription = ''
+    editTags = []
+  }
+
+  function toggleTag(tag) {
+    if (editTags.includes(tag.id)) {
+      editTags = editTags.filter(id => id !== tag.id)
+    } else if (editTags.length < 5) {
+      editTags = [...editTags, tag.id]
+    }
+  }
+
+  async function saveEdit() {
+    if (!editTitle.trim()) return
+
+    saving = true
+    error = null
+
+    try {
+      await updateBuild(build.id, {
+        title: editTitle.trim(),
+        description: editDescription.trim()
+      })
+
+      // Update tags
+      await updateBuildTags(build.id, editTags)
+
+      // Update local state
+      build.title = editTitle.trim()
+      build.description = editDescription.trim()
+      // Update tags in local state - map tag IDs to full tag objects
+      build.tags = editTags.map(tagId => {
+        const tag = availableTags.find(t => t.id === tagId)
+        return tag || { id: tagId, name: 'Unknown', color: '#c4b8a4' }
+      })
+      editing = false
+    } catch (e) {
+      console.error('Error updating build:', e)
+      error = 'Failed to save changes'
+    } finally {
+      saving = false
     }
   }
 
@@ -164,7 +238,16 @@
 
             <Panel>
               <div class="build-header">
-                <h1 class="build-title">{build.title}</h1>
+                {#if editing}
+                  <input
+                    type="text"
+                    class="edit-title-input"
+                    bind:value={editTitle}
+                    placeholder="Build title"
+                  />
+                {:else}
+                  <h1 class="build-title">{build.title}</h1>
+                {/if}
                 {#if build.author}
                   <button
                     class="author-link"
@@ -183,15 +266,37 @@
               </div>
             </Panel>
 
-            {#if build.tags && build.tags.length > 0}
+            {#if editing || (build.tags && build.tags.length > 0)}
               <Panel>
                 <div class="tags-section">
-                  <h3 class="section-label">Tags</h3>
-                  <div class="tags-list">
-                    {#each build.tags as tag}
-                      <span class="tag" style="--tag-color: {tag.color || '#c4b8a4'}">{tag.name}</span>
-                    {/each}
-                  </div>
+                  <h3 class="section-label">
+                    Tags
+                    {#if editing}
+                      <small class="tag-count">({editTags.length}/5)</small>
+                    {/if}
+                  </h3>
+                  {#if editing}
+                    <div class="tags-grid">
+                      {#each availableTags as tag}
+                        <button
+                          type="button"
+                          class="tag-btn"
+                          class:selected={editTags.includes(tag.id)}
+                          style="--tag-color: {tag.color}"
+                          onclick={() => toggleTag(tag)}
+                          disabled={saving || (!editTags.includes(tag.id) && editTags.length >= 5)}
+                        >
+                          {tag.name}
+                        </button>
+                      {/each}
+                    </div>
+                  {:else}
+                    <div class="tags-list">
+                      {#each build.tags as tag}
+                        <span class="tag" style="--tag-color: {tag.color || '#c4b8a4'}">{tag.name}</span>
+                      {/each}
+                    </div>
+                  {/if}
                 </div>
               </Panel>
             {/if}
@@ -199,9 +304,18 @@
             <Panel>
               <div class="description-section">
                 <h3 class="section-label">Description</h3>
-                <div class="description">
-                  {build.description || 'No description provided.'}
-                </div>
+                {#if editing}
+                  <textarea
+                    class="edit-description-input"
+                    bind:value={editDescription}
+                    placeholder="Build description..."
+                    rows="6"
+                  ></textarea>
+                {:else}
+                  <div class="description">
+                    {build.description || 'No description provided.'}
+                  </div>
+                {/if}
               </div>
             </Panel>
 
@@ -311,15 +425,40 @@
               <Panel>
                 <div class="manage-section">
                   <h3 class="section-label">Manage</h3>
-                  <button class="delete-btn" onclick={() => showDeleteConfirm = true}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                      <line x1="10" y1="11" x2="10" y2="17" />
-                      <line x1="14" y1="11" x2="14" y2="17" />
-                    </svg>
-                    Delete Build
-                  </button>
+                  {#if editing}
+                    <div class="edit-actions">
+                      <button class="save-btn" onclick={saveEdit} disabled={saving || !editTitle.trim()}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        {saving ? 'Saving...' : 'Save Changes'}
+                      </button>
+                      <button class="cancel-edit-btn" onclick={cancelEditing} disabled={saving}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <line x1="18" y1="6" x2="6" y2="18" />
+                          <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                        Cancel
+                      </button>
+                    </div>
+                  {:else}
+                    <button class="edit-btn" onclick={startEditing}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                      Edit Build
+                    </button>
+                    <button class="delete-btn" onclick={() => showDeleteConfirm = true}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <line x1="10" y1="11" x2="10" y2="17" />
+                        <line x1="14" y1="11" x2="14" y2="17" />
+                      </svg>
+                      Delete Build
+                    </button>
+                  {/if}
                 </div>
               </Panel>
             {/if}
@@ -329,7 +468,7 @@
     </div>
   </main>
 
-  <Footer />
+  <Footer {onnavigate} />
 </div>
 
 {#if showDeleteConfirm}
@@ -525,6 +664,47 @@
     background: color-mix(in srgb, var(--tag-color, #6b5a48) 15%, transparent);
     border: 1px solid color-mix(in srgb, var(--tag-color, #6b5a48) 40%, transparent);
     border-radius: 3px;
+  }
+
+  .tag-count {
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: #6a5a4a;
+    margin-left: 0.5rem;
+  }
+
+  .tags-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .tag-btn {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #a89880;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid #3d3428;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .tag-btn:hover:not(:disabled) {
+    background: rgba(60, 50, 40, 0.4);
+    border-color: var(--tag-color, #4a3f32);
+  }
+
+  .tag-btn.selected {
+    background: rgba(212, 164, 76, 0.15);
+    border-color: var(--tag-color, #d4a44c);
+    color: #f5d898;
+  }
+
+  .tag-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Description */
@@ -739,9 +919,153 @@
     margin: 0 0 1.5rem 0;
   }
 
+  /* Edit Inputs */
+  .edit-title-input {
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #f5d898;
+    background: linear-gradient(180deg, #2a241c 0%, #1e1a15 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 4px;
+    outline: none;
+    box-sizing: border-box;
+  }
+
+  .edit-title-input:focus {
+    border-color: #6bb8cc;
+  }
+
+  .edit-description-input {
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 0.95rem;
+    color: #c4b8a4;
+    background: linear-gradient(180deg, #2a241c 0%, #1e1a15 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 4px;
+    outline: none;
+    resize: vertical;
+    min-height: 120px;
+    font-family: inherit;
+    line-height: 1.6;
+    box-sizing: border-box;
+  }
+
+  .edit-description-input:focus {
+    border-color: #6bb8cc;
+  }
+
   /* Manage Section */
   .manage-section {
     padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .manage-section .section-label {
+    margin-bottom: 0.25rem;
+  }
+
+  .edit-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .edit-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: linear-gradient(180deg, #3a4a5a 0%, #2a3a4a 100%);
+    border: 1px solid #4a5a6a;
+    border-radius: 6px;
+    color: #b8d0e8;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .edit-btn:hover {
+    background: linear-gradient(180deg, #4a5a6a 0%, #3a4a5a 100%);
+    border-color: #5a7a8a;
+    color: #d0e8f0;
+  }
+
+  .edit-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .save-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: linear-gradient(180deg, #3a5a3a 0%, #2d4a2d 100%);
+    border: 1px solid #4a6a4a;
+    border-radius: 6px;
+    color: #b8e0b8;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .save-btn:hover:not(:disabled) {
+    background: linear-gradient(180deg, #4a6a4a 0%, #3a5a3a 100%);
+    border-color: #5a8a5a;
+    color: #d4f0d4;
+  }
+
+  .save-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .save-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .cancel-edit-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: linear-gradient(180deg, #4d4235 0%, #3a3127 100%);
+    border: 1px solid #6b5a48;
+    border-radius: 6px;
+    color: #f0e6d8;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .cancel-edit-btn:hover:not(:disabled) {
+    background: linear-gradient(180deg, #5a4d3e 0%, #453a2e 100%);
+    border-color: #9c8465;
+  }
+
+  .cancel-edit-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .cancel-edit-btn svg {
+    width: 18px;
+    height: 18px;
   }
 
   .delete-btn {

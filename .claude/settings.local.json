@@ -20,7 +20,8 @@
       "Bash(taskkill:*)",
       "WebFetch(domain:modtale.net)",
       "WebFetch(domain:api.modtale.net)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(grep:*)"
     ]
   }
 }

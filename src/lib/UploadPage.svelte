@@ -74,7 +74,7 @@
     </div>
   </main>
 
-  <Footer />
+  <Footer {onnavigate} />
 </div>
 
 <AuthModal bind:open={showAuthModal} onclose={() => showAuthModal = false} />

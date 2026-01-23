@@ -329,7 +329,7 @@
     </div>
   </main>
 
-  <Footer />
+  <Footer {onnavigate} />
 </div>
 
 <style>
@@ -376,7 +376,9 @@
   .banner {
     position: relative;
     width: 100%;
-    height: 200px;
+    aspect-ratio: 16 / 7;
+    min-height: 220px;
+    max-height: 360px;
     border-radius: 8px;
     overflow: hidden;
     margin-bottom: -80px;
@@ -386,12 +388,13 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: center;
   }
 
   .banner-overlay {
     position: absolute;
     inset: 0;
-    background: linear-gradient(to bottom, transparent 0%, rgba(22, 18, 14, 0.9) 100%);
+    background: linear-gradient(to bottom, transparent 40%, rgba(22, 18, 14, 0.95) 100%);
   }
 
   /* Layout */

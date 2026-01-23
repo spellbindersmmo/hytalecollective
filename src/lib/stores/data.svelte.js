@@ -19,7 +19,7 @@ export async function fetchFeaturedBuilds(limit = 4) {
   const { data, error } = await supabase
     .from('builds')
     .select(`
-      *,
+      id, title, slug, description, thumbnail_path, download_count, view_count,
       author:profiles(username, avatar_url),
       tags:build_tags(tag:tags(name, slug, color))
     `)
@@ -40,7 +40,7 @@ export async function fetchBuilds({ page = 1, limit = 20, tag = null, search = n
   let query = supabase
     .from('builds')
     .select(`
-      *,
+      id, title, slug, description, thumbnail_path, download_count, view_count, created_at,
       author:profiles(username, avatar_url),
       tags:build_tags(tag:tags(name, slug, color))
     `, { count: 'exact' })
@@ -96,6 +96,56 @@ export async function fetchBuildBySlug(slug) {
   }
 }
 
+export async function updateBuild(buildId, updates) {
+  const { data, error } = await supabase
+    .from('builds')
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', buildId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function updateBuildTags(buildId, tagIds) {
+  // Delete existing tags
+  const { error: deleteError } = await supabase
+    .from('build_tags')
+    .delete()
+    .eq('build_id', buildId)
+
+  if (deleteError) throw deleteError
+
+  // Insert new tags if any
+  if (tagIds.length > 0) {
+    const tagRecords = tagIds.map(tagId => ({
+      build_id: buildId,
+      tag_id: tagId
+    }))
+
+    const { error: insertError } = await supabase
+      .from('build_tags')
+      .insert(tagRecords)
+
+    if (insertError) throw insertError
+  }
+}
+
+export async function fetchAllTags() {
+  const { data, error } = await supabase
+    .from('tags')
+    .select('*')
+    .order('usage_count', { ascending: false })
+    .limit(30)
+
+  if (error) throw error
+  return data
+}
+
 export async function deleteBuild(buildId, filePath, thumbnailPath) {
   // Delete storage files first
   if (filePath) {
@@ -137,7 +187,7 @@ export async function fetchFeaturedWorlds(limit = 4) {
   const { data, error } = await supabase
     .from('worlds')
     .select(`
-      *,
+      id, title, slug, description, thumbnail_path, download_count, view_count,
       author:profiles(username, avatar_url),
       tags:world_tags(tag:tags(name, slug, color))
     `)
@@ -187,7 +237,7 @@ export async function fetchFeaturedServers(limit = 4) {
   const { data, error } = await supabase
     .from('servers')
     .select(`
-      *,
+      id, name, slug, description, icon_url, banner_url, status, current_players, max_players,
       owner:profiles(username, avatar_url),
       tags:server_tags(tag:tags(name, slug, color))
     `)
@@ -209,7 +259,7 @@ export async function fetchServers({ page = 1, limit = 20, tag = null, status = 
   let query = supabase
     .from('servers')
     .select(`
-      *,
+      id, name, slug, description, icon_url, banner_url, status, current_players, max_players, source,
       owner:profiles(username, avatar_url),
       tags:server_tags(tag:tags(name, slug, color))
     `, { count: 'exact' })
@@ -391,7 +441,7 @@ export async function fetchRecentPosts(limit = 5) {
   const { data, error } = await supabase
     .from('forum_posts')
     .select(`
-      *,
+      id, title, slug, reply_count, view_count, last_activity_at,
       author:profiles(username, avatar_url),
       category:forum_categories(name, slug, color)
     `)
@@ -412,7 +462,7 @@ export async function fetchPostsByCategory(categorySlug, { page = 1, limit = 20 
   const { data, error, count } = await supabase
     .from('forum_posts')
     .select(`
-      *,
+      id, title, slug, reply_count, view_count, is_pinned, is_locked, is_solved, last_activity_at,
       author:profiles(username, avatar_url),
       category:forum_categories!inner(name, slug, color)
     `, { count: 'exact' })

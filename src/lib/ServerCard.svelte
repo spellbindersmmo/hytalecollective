@@ -152,7 +152,9 @@
   .card-banner {
     position: relative;
     width: 100%;
-    height: 80px;
+    aspect-ratio: 16 / 9;
+    min-height: 160px;
+    max-height: 220px;
     overflow: hidden;
   }
 
@@ -160,12 +162,13 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: center;
   }
 
   .banner-overlay {
     position: absolute;
     inset: 0;
-    background: linear-gradient(to bottom, transparent 0%, rgba(42, 36, 28, 0.8) 100%);
+    background: linear-gradient(to bottom, transparent 30%, rgba(42, 36, 28, 0.9) 100%);
   }
 
   .card-content {

@@ -474,7 +474,7 @@
     </div>
   </main>
 
-  <Footer />
+  <Footer {onnavigate} />
 </div>
 
 <!-- Delete Confirmation Modal -->

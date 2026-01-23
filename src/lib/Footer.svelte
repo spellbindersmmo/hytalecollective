@@ -1,15 +1,16 @@
 <script>
+  let { onnavigate = () => {} } = $props()
+
   const currentYear = new Date().getFullYear()
 
   const footerLinks = {
     explore: [
-      { label: 'Builds', href: '/builds' },
-      { label: 'Worlds', href: '/worlds' },
-      { label: 'Servers', href: '/servers' },
+      { label: 'Builds', page: 'builds' },
+      { label: 'Servers', page: 'servers' },
       { label: 'Collections', href: '/collections' }
     ],
     community: [
-      { label: 'Forum', href: '/forum' },
+      { label: 'Forum', page: 'forum' },
       { label: 'Discord', href: '#' },
       { label: 'Events', href: '/events' },
       { label: 'Creators', href: '/creators' }
@@ -20,6 +21,12 @@
       { label: 'Contact', href: '/contact' },
       { label: 'Report Issue', href: '/report' }
     ]
+  }
+
+  function handleLinkClick(link) {
+    if (link.page) {
+      onnavigate(link.page)
+    }
   }
 </script>
 
@@ -63,7 +70,13 @@
           <h4 class="link-title">Explore</h4>
           <ul class="link-list">
             {#each footerLinks.explore as link}
-              <li><a href={link.href}>{link.label}</a></li>
+              <li>
+                {#if link.page}
+                  <button onclick={() => handleLinkClick(link)}>{link.label}</button>
+                {:else}
+                  <a href={link.href}>{link.label}</a>
+                {/if}
+              </li>
             {/each}
           </ul>
         </div>
@@ -72,7 +85,13 @@
           <h4 class="link-title">Community</h4>
           <ul class="link-list">
             {#each footerLinks.community as link}
-              <li><a href={link.href}>{link.label}</a></li>
+              <li>
+                {#if link.page}
+                  <button onclick={() => handleLinkClick(link)}>{link.label}</button>
+                {:else}
+                  <a href={link.href}>{link.label}</a>
+                {/if}
+              </li>
             {/each}
           </ul>
         </div>
@@ -81,7 +100,13 @@
           <h4 class="link-title">Support</h4>
           <ul class="link-list">
             {#each footerLinks.support as link}
-              <li><a href={link.href}>{link.label}</a></li>
+              <li>
+                {#if link.page}
+                  <button onclick={() => handleLinkClick(link)}>{link.label}</button>
+                {:else}
+                  <a href={link.href}>{link.label}</a>
+                {/if}
+              </li>
             {/each}
           </ul>
         </div>
@@ -194,14 +219,21 @@
     margin-bottom: 0.5rem;
   }
 
-  .link-list a {
+  .link-list a,
+  .link-list button {
     font-size: 0.85rem;
     color: #a89880;
     text-decoration: none;
     transition: color 0.15s ease;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font-family: inherit;
   }
 
-  .link-list a:hover {
+  .link-list a:hover,
+  .link-list button:hover {
     color: #f0d090;
   }
 
