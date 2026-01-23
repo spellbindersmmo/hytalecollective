@@ -19,7 +19,7 @@ export async function fetchFeaturedBuilds(limit = 4) {
   const { data, error } = await supabase
     .from('builds')
     .select(`
-      id, title, slug, description, thumbnail_path, download_count, view_count,
+      id, title, slug, description, thumbnail_path, download_count, view_count, total_votes,
       author:profiles(username, avatar_url),
       tags:build_tags(tag:tags(name, slug, color))
     `)
@@ -40,14 +40,26 @@ export async function fetchBuilds({ page = 1, limit = 20, tag = null, search = n
   let query = supabase
     .from('builds')
     .select(`
-      id, title, slug, description, thumbnail_path, download_count, view_count, created_at,
+      id, title, slug, description, thumbnail_path, download_count, view_count, total_votes, created_at,
       author:profiles(username, avatar_url),
       tags:build_tags(tag:tags(name, slug, color))
     `, { count: 'exact' })
     .eq('status', 'published')
 
   if (tag) {
-    query = query.contains('tags', [{ tag: { slug: tag } }])
+    // Filter builds that have this tag by querying through the junction table
+    const { data: buildIds } = await supabase
+      .from('build_tags')
+      .select('build_id, tag:tags!inner(slug)')
+      .eq('tag.slug', tag)
+
+    if (buildIds && buildIds.length > 0) {
+      const ids = buildIds.map(b => b.build_id)
+      query = query.in('id', ids)
+    } else {
+      // No builds have this tag, return empty
+      return { builds: [], total: 0, page, limit }
+    }
   }
 
   if (search) {
@@ -299,20 +311,35 @@ export async function fetchFeaturedServers(limit = 4) {
 }
 
 export async function fetchServers({ page = 1, limit = 20, tag = null, status = null, search = null, source = null, sortBy = 'current_players' }) {
+  // When filtering by tag, we need to use an inner join approach
+  let selectQuery = `
+    id, name, slug, description, icon_url, banner_url, status, current_players, max_players, source,
+    owner:profiles(username, avatar_url),
+    tags:server_tags(tag:tags(name, slug, color))
+  `
+
   let query = supabase
     .from('servers')
-    .select(`
-      id, name, slug, description, icon_url, banner_url, status, current_players, max_players, source,
-      owner:profiles(username, avatar_url),
-      tags:server_tags(tag:tags(name, slug, color))
-    `, { count: 'exact' })
+    .select(selectQuery, { count: 'exact' })
 
   if (status && status !== 'all') {
     query = query.eq('status', status)
   }
 
   if (tag) {
-    query = query.contains('tags', [{ tag: { slug: tag } }])
+    // Filter servers that have this tag by querying through the junction table
+    const { data: serverIds } = await supabase
+      .from('server_tags')
+      .select('server_id, tag:tags!inner(slug)')
+      .eq('tag.slug', tag)
+
+    if (serverIds && serverIds.length > 0) {
+      const ids = serverIds.map(s => s.server_id)
+      query = query.in('id', ids)
+    } else {
+      // No servers have this tag, return empty
+      return { servers: [], total: 0, page, limit }
+    }
   }
 
   if (search) {
