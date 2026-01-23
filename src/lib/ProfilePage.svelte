@@ -12,9 +12,8 @@
 
   let profile = $state(null)
   let builds = $state([])
-  let worlds = $state([])
   let forumPosts = $state([])
-  let stats = $state({ builds: 0, worlds: 0, downloads: 0, posts: 0 })
+  let stats = $state({ builds: 0, downloads: 0, posts: 0, points: 0 })
   let loading = $state(true)
   let activeTab = $state('builds')
   let isOwnProfile = $derived(auth.profile?.username === username)
@@ -55,25 +54,6 @@
         tags: build.tags?.map(t => t.tag.name) || []
       }))
 
-      // Fetch user's worlds
-      const { data: worldsData, count: worldsCount } = await supabase
-        .from('worlds')
-        .select(`
-          *,
-          author:profiles(username, avatar_url),
-          tags:world_tags(tag:tags(name, slug, color))
-        `, { count: 'exact' })
-        .eq('author_id', profile.id)
-        .eq('status', 'published')
-        .order('created_at', { ascending: false })
-        .limit(6)
-
-      worlds = (worldsData || []).map(world => ({
-        ...world,
-        thumbnail: getStorageUrl('thumbnails', world.thumbnail_path),
-        tags: world.tags?.map(t => t.tag.name) || []
-      }))
-
       // Fetch forum posts
       const { data: postsData, count: postsCount } = await supabase
         .from('forum_posts')
@@ -87,16 +67,45 @@
 
       forumPosts = postsData || []
 
+      // Fetch ALL builds to get total downloads (not just displayed ones)
+      const { data: allBuildsData } = await supabase
+        .from('builds')
+        .select('download_count, view_count')
+        .eq('author_id', profile.id)
+        .eq('status', 'published')
+
       // Calculate total downloads
       const totalDownloads =
-        (buildsData || []).reduce((sum, b) => sum + (b.download_count || 0), 0) +
-        (worldsData || []).reduce((sum, w) => sum + (w.download_count || 0), 0)
+        (allBuildsData || []).reduce((sum, b) => sum + (b.download_count || 0), 0)
+
+      // Get total replies received on user's posts
+      const totalRepliesReceived =
+        (postsData || []).reduce((sum, p) => sum + (p.reply_count || 0), 0)
+
+      // Get replies made by user
+      const { count: repliesMadeCount } = await supabase
+        .from('forum_replies')
+        .select('id', { count: 'exact', head: true })
+        .eq('author_id', profile.id)
+
+      // Calculate points:
+      // - 2 points per download
+      // - 10 points per build uploaded
+      // - 5 points per reply received on your posts
+      // - 3 points per forum post created
+      // - 1 point per reply made
+      const points =
+        (totalDownloads * 2) +
+        ((buildsCount || 0) * 10) +
+        (totalRepliesReceived * 5) +
+        ((postsCount || 0) * 3) +
+        ((repliesMadeCount || 0) * 1)
 
       stats = {
         builds: buildsCount || 0,
-        worlds: worldsCount || 0,
         downloads: totalDownloads,
-        posts: postsCount || 0
+        posts: postsCount || 0,
+        points
       }
 
     } catch (e) {
@@ -170,6 +179,12 @@
                 {#if profile.display_name}
                   <span class="handle">@{profile.username}</span>
                 {/if}
+                <div class="points-badge" title="Reputation Points">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                  <span>{stats.points.toLocaleString()}</span>
+                </div>
               </div>
 
               {#if profile.bio}
@@ -217,12 +232,12 @@
 
             <div class="stats-grid">
               <div class="stat">
-                <span class="stat-value">{stats.builds}</span>
-                <span class="stat-label">Builds</span>
+                <span class="stat-value">{stats.points.toLocaleString()}</span>
+                <span class="stat-label">Points</span>
               </div>
               <div class="stat">
-                <span class="stat-value">{stats.worlds}</span>
-                <span class="stat-label">Worlds</span>
+                <span class="stat-value">{stats.builds}</span>
+                <span class="stat-label">Builds</span>
               </div>
               <div class="stat">
                 <span class="stat-value">{stats.downloads}</span>
@@ -244,13 +259,6 @@
             onclick={() => activeTab = 'builds'}
           >
             Builds ({stats.builds})
-          </button>
-          <button
-            class="tab"
-            class:active={activeTab === 'worlds'}
-            onclick={() => activeTab = 'worlds'}
-          >
-            Worlds ({stats.worlds})
           </button>
           <button
             class="tab"
@@ -290,38 +298,6 @@
                 <div class="view-all">
                   <Button variant="secondary" onclick={() => onnavigate(`user-builds-${username}`)}>
                     View All Builds
-                  </Button>
-                </div>
-              {/if}
-            {/if}
-          {:else if activeTab === 'worlds'}
-            {#if worlds.length === 0}
-              <Panel>
-                <div class="empty-state">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="2" y1="12" x2="22" y2="12" />
-                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                  </svg>
-                  <p>No worlds uploaded yet.</p>
-                </div>
-              </Panel>
-            {:else}
-              <div class="content-grid">
-                {#each worlds as world}
-                  <BuildCard
-                    title={world.title}
-                    author={world.author?.username}
-                    thumbnail={world.thumbnail}
-                    tags={world.tags}
-                    downloads={world.download_count}
-                  />
-                {/each}
-              </div>
-              {#if stats.worlds > 6}
-                <div class="view-all">
-                  <Button variant="secondary" onclick={() => onnavigate(`user-worlds-${username}`)}>
-                    View All Worlds
                   </Button>
                 </div>
               {/if}
@@ -491,14 +467,15 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.5rem;
     margin-bottom: 0.75rem;
   }
 
   @media (min-width: 640px) {
     .name-row {
       flex-direction: row;
-      align-items: baseline;
+      align-items: center;
+      flex-wrap: wrap;
       gap: 0.75rem;
     }
   }
@@ -513,6 +490,24 @@
   .handle {
     font-size: 0.95rem;
     color: #8a7a6a;
+  }
+
+  .points-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.6rem;
+    background: linear-gradient(180deg, #d4a44c 0%, #a67c28 100%);
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #1a1208;
+    box-shadow: 0 2px 6px rgba(212, 164, 76, 0.3);
+  }
+
+  .points-badge svg {
+    width: 14px;
+    height: 14px;
   }
 
   .bio {

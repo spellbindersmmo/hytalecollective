@@ -23,6 +23,61 @@
   let saving = $state(false)
   let showDeleteConfirm = $state(false)
   let deleting = $state(false)
+  let replyTextarea = $state(null)
+
+  // Formatting functions for reply
+  function insertFormat(before, after = before) {
+    if (!replyTextarea) return
+
+    const start = replyTextarea.selectionStart
+    const end = replyTextarea.selectionEnd
+    const selectedText = replyContent.substring(start, end)
+    const newText = before + selectedText + after
+
+    replyContent = replyContent.substring(0, start) + newText + replyContent.substring(end)
+
+    setTimeout(() => {
+      replyTextarea.focus()
+      if (selectedText) {
+        replyTextarea.setSelectionRange(start + before.length, end + before.length)
+      } else {
+        replyTextarea.setSelectionRange(start + before.length, start + before.length)
+      }
+    }, 0)
+  }
+
+  function insertLineFormat(prefix) {
+    if (!replyTextarea) return
+
+    const start = replyTextarea.selectionStart
+    const beforeSelection = replyContent.substring(0, start)
+    const lineStart = beforeSelection.lastIndexOf('\n') + 1
+
+    replyContent = replyContent.substring(0, lineStart) + prefix + replyContent.substring(lineStart)
+
+    setTimeout(() => {
+      replyTextarea.focus()
+    }, 0)
+  }
+
+  function insertLink() {
+    if (!replyTextarea) return
+
+    const start = replyTextarea.selectionStart
+    const end = replyTextarea.selectionEnd
+    const selectedText = replyContent.substring(start, end)
+
+    const linkText = selectedText || 'link text'
+    const newText = `[${linkText}](url)`
+
+    replyContent = replyContent.substring(0, start) + newText + replyContent.substring(end)
+
+    setTimeout(() => {
+      replyTextarea.focus()
+      const urlStart = start + linkText.length + 3
+      replyTextarea.setSelectionRange(urlStart, urlStart + 3)
+    }, 0)
+  }
 
   // Check if current user is the post author
   const isAuthor = $derived(
@@ -123,6 +178,60 @@
       year: 'numeric',
       month: 'short'
     })
+  }
+
+  // Simple markdown renderer
+  function renderMarkdown(text) {
+    if (!text) return ''
+
+    let html = text
+      // Escape HTML first
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+
+      // Code blocks (must be before other formatting)
+      .replace(/```([\s\S]*?)```/g, '<pre class="code-block">$1</pre>')
+
+      // Headings
+      .replace(/^### (.+)$/gm, '<h4 class="md-h3">$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3 class="md-h2">$1</h3>')
+      .replace(/^# (.+)$/gm, '<h2 class="md-h1">$1</h2>')
+
+      // Bold and italic
+      .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+
+      // Strikethrough
+      .replace(/~~(.+?)~~/g, '<del>$1</del>')
+
+      // Inline code
+      .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
+
+      // Links
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+
+      // Images
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-image" />')
+
+      // Blockquotes
+      .replace(/^&gt; (.+)$/gm, '<blockquote class="md-quote">$1</blockquote>')
+
+      // Bullet lists
+      .replace(/^- (.+)$/gm, '<li class="md-bullet">$1</li>')
+
+      // Numbered lists
+      .replace(/^\d+\. (.+)$/gm, '<li class="md-numbered">$1</li>')
+
+      // Line breaks
+      .replace(/\n/g, '<br />')
+
+    // Wrap consecutive list items
+    html = html.replace(/(<li class="md-bullet">.*?<\/li>)(<br \/>)?/g, '$1')
+    html = html.replace(/(<li class="md-numbered">.*?<\/li>)(<br \/>)?/g, '$1')
+
+    return html
   }
 
   // Edit functions
@@ -315,8 +424,8 @@
                     </div>
                   </div>
                 {:else}
-                  <div class="content">
-                    {post.content}
+                  <div class="content markdown-content">
+                    {@html renderMarkdown(post.content)}
                   </div>
                   <footer class="post-footer">
                     <span class="timestamp">{formatDate(post.created_at)}</span>
@@ -351,8 +460,8 @@
                   </aside>
 
                   <div class="content-area">
-                    <div class="content">
-                      {reply.content}
+                    <div class="content markdown-content">
+                      {@html renderMarkdown(reply.content)}
                     </div>
                     <footer class="post-footer">
                       <span class="timestamp">{formatDate(reply.created_at)}</span>
@@ -375,9 +484,55 @@
             {#if auth.isAuthenticated}
               <Panel>
                 <form class="reply-form" onsubmit={(e) => { e.preventDefault(); submitReply(); }}>
+                  <!-- Formatting Toolbar -->
+                  <div class="editor-toolbar">
+                    <button type="button" class="toolbar-btn" title="Bold" onclick={() => insertFormat('**')}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z" />
+                        <path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z" />
+                      </svg>
+                    </button>
+                    <button type="button" class="toolbar-btn" title="Italic" onclick={() => insertFormat('*')}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="19" y1="4" x2="10" y2="4" />
+                        <line x1="14" y1="20" x2="5" y2="20" />
+                        <line x1="15" y1="4" x2="9" y2="20" />
+                      </svg>
+                    </button>
+                    <button type="button" class="toolbar-btn" title="Link" onclick={insertLink}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                      </svg>
+                    </button>
+                    <button type="button" class="toolbar-btn" title="Bullet List" onclick={() => insertLineFormat('- ')}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="9" y1="6" x2="20" y2="6" />
+                        <line x1="9" y1="12" x2="20" y2="12" />
+                        <line x1="9" y1="18" x2="20" y2="18" />
+                        <circle cx="4" cy="6" r="1.5" fill="currentColor" />
+                        <circle cx="4" cy="12" r="1.5" fill="currentColor" />
+                        <circle cx="4" cy="18" r="1.5" fill="currentColor" />
+                      </svg>
+                    </button>
+                    <button type="button" class="toolbar-btn" title="Quote" onclick={() => insertLineFormat('> ')}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z" />
+                        <path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3z" />
+                      </svg>
+                    </button>
+                    <button type="button" class="toolbar-btn" title="Code" onclick={() => insertFormat('`')}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="16 18 22 12 16 6" />
+                        <polyline points="8 6 2 12 8 18" />
+                      </svg>
+                    </button>
+                  </div>
+
                   <textarea
                     bind:value={replyContent}
-                    placeholder="Write your reply..."
+                    bind:this={replyTextarea}
+                    placeholder="Write your reply... Supports Markdown formatting."
                     rows="4"
                     disabled={submitting}
                     required
@@ -751,8 +906,107 @@
   .content {
     color: #c4b8a4;
     line-height: 1.7;
-    white-space: pre-wrap;
     word-wrap: break-word;
+  }
+
+  /* Markdown Styles */
+  .markdown-content :global(h2.md-h1) {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #f5d898;
+    margin: 1rem 0 0.5rem 0;
+  }
+
+  .markdown-content :global(h3.md-h2) {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #f0e6d8;
+    margin: 1rem 0 0.5rem 0;
+  }
+
+  .markdown-content :global(h4.md-h3) {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #e0d6c8;
+    margin: 0.75rem 0 0.35rem 0;
+  }
+
+  .markdown-content :global(strong) {
+    font-weight: 700;
+    color: #f0e6d8;
+  }
+
+  .markdown-content :global(em) {
+    font-style: italic;
+  }
+
+  .markdown-content :global(del) {
+    text-decoration: line-through;
+    opacity: 0.7;
+  }
+
+  .markdown-content :global(a) {
+    color: #6bb8cc;
+    text-decoration: none;
+  }
+
+  .markdown-content :global(a:hover) {
+    text-decoration: underline;
+  }
+
+  .markdown-content :global(.md-image) {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    margin: 0.5rem 0;
+    border: 1px solid #3d3428;
+  }
+
+  .markdown-content :global(.code-block) {
+    display: block;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid #3d3428;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    margin: 0.5rem 0;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.85rem;
+    color: #d4d4d4;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .markdown-content :global(.inline-code) {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid #3d3428;
+    border-radius: 3px;
+    padding: 0.1rem 0.4rem;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.85em;
+    color: #e8c36b;
+  }
+
+  .markdown-content :global(.md-quote) {
+    border-left: 3px solid #d4a44c;
+    padding-left: 1rem;
+    margin: 0.5rem 0;
+    color: #a89880;
+    font-style: italic;
+  }
+
+  .markdown-content :global(li.md-bullet),
+  .markdown-content :global(li.md-numbered) {
+    display: list-item;
+    margin-left: 1.5rem;
+    padding: 0.1rem 0;
+  }
+
+  .markdown-content :global(li.md-bullet) {
+    list-style-type: disc;
+  }
+
+  .markdown-content :global(li.md-numbered) {
+    list-style-type: decimal;
   }
 
   .post-footer {
@@ -811,7 +1065,58 @@
   .reply-form {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 0;
+  }
+
+  /* Editor Toolbar */
+  .editor-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid #4a3f32;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+  }
+
+  .toolbar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: #a89880;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .toolbar-btn:hover {
+    background: rgba(212, 164, 76, 0.15);
+    border-color: #4a3f32;
+    color: #d4a44c;
+  }
+
+  .toolbar-btn:active {
+    background: rgba(212, 164, 76, 0.25);
+  }
+
+  .toolbar-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .reply-form textarea {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+
+  .form-actions {
+    margin-top: 1rem;
   }
 
   textarea {

@@ -6,6 +6,7 @@
   import Panel from './lib/Panel.svelte'
   import Button from './lib/Button.svelte'
   import BuildCard from './lib/BuildCard.svelte'
+  import ModCard from './lib/ModCard.svelte'
   import ServerCard from './lib/ServerCard.svelte'
   import ForumPost from './lib/ForumPost.svelte'
   import UploadPage from './lib/UploadPage.svelte'
@@ -22,13 +23,14 @@
   import ModDetailPage from './lib/ModDetailPage.svelte'
   import BuildsPage from './lib/BuildsPage.svelte'
   import BuildDetailPage from './lib/BuildDetailPage.svelte'
+  import AdminPage from './lib/AdminPage.svelte'
   import { auth } from './lib/stores/auth.svelte.js'
   import {
     fetchFeaturedBuilds,
-    fetchFeaturedWorlds,
     fetchFeaturedServers,
     fetchRecentPosts
   } from './lib/stores/data.svelte.js'
+  import { searchProjects } from './lib/modtale.js'
 
   // Simple page routing
   let currentPage = $state('home')
@@ -50,9 +52,9 @@
   let modSlug = $derived(getRouteParam(currentPage, 'mod-'))
   let buildSlug = $derived(getRouteParam(currentPage, 'build-'))
 
-  // Data fetched from Supabase
+  // Data fetched from Supabase and APIs
   let featuredBuilds = $state([])
-  let featuredWorlds = $state([])
+  let popularMods = $state([])
   let featuredServers = $state([])
   let recentPosts = $state([])
   let loading = $state(true)
@@ -68,21 +70,47 @@
     window.navigate = navigate
   }
 
-  onMount(async () => {
-    // Initialize auth
-    await auth.initialize()
+  // Add timeout wrapper for fetch operations
+  function withTimeout(promise, ms = 10000) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Request timeout')), ms)
+      )
+    ])
+  }
 
-    // Fetch all featured content in parallel
+  onMount(async () => {
+    // Initialize auth with timeout
     try {
-      const [builds, worlds, servers, posts] = await Promise.all([
-        fetchFeaturedBuilds(4).catch(() => []),
-        fetchFeaturedWorlds(4).catch(() => []),
-        fetchFeaturedServers(4).catch(() => []),
-        fetchRecentPosts(5).catch(() => [])
+      await withTimeout(auth.initialize(), 5000)
+    } catch (e) {
+      console.error('Auth init timeout or error:', e)
+    }
+
+    // Fetch all featured content in parallel with timeouts
+    try {
+      const [builds, modsData, servers, posts] = await Promise.all([
+        withTimeout(fetchFeaturedBuilds(4), 8000).catch((e) => {
+          console.error('Error fetching builds:', e)
+          return []
+        }),
+        withTimeout(searchProjects({ size: 4, sort: 'downloads' }), 8000).catch((e) => {
+          console.error('Error fetching mods:', e)
+          return { projects: [] }
+        }),
+        withTimeout(fetchFeaturedServers(4), 8000).catch((e) => {
+          console.error('Error fetching servers:', e)
+          return []
+        }),
+        withTimeout(fetchRecentPosts(5), 8000).catch((e) => {
+          console.error('Error fetching posts:', e)
+          return []
+        })
       ])
 
       featuredBuilds = builds
-      featuredWorlds = worlds
+      popularMods = modsData.projects || []
       featuredServers = servers
       recentPosts = posts
     } catch (e) {
@@ -94,7 +122,9 @@
   })
 </script>
 
-{#if currentPage === 'upload'}
+{#if currentPage === 'admin'}
+  <AdminPage onnavigate={navigate} />
+{:else if currentPage === 'upload'}
   <UploadPage onnavigate={navigate} />
 {:else if currentPage === 'forum'}
   <ForumPage onnavigate={navigate} />
@@ -129,103 +159,155 @@
   <main>
     <Hero onnavigate={navigate} />
 
-    <!-- Featured Builds Section -->
-    <section class="section">
-      <div class="container">
-        <div class="section-header">
-          <div>
-            <h2 class="section-title">Featured Builds</h2>
-            <p class="section-subtitle">Discover amazing creations from the community</p>
-          </div>
-          <Button variant="secondary" href="/builds">View All</Button>
-        </div>
-
-        <div class="card-grid">
-          {#each featuredBuilds as build}
-            <BuildCard {...build} />
-          {/each}
-        </div>
-      </div>
-    </section>
-
-    <!-- Featured Worlds Section -->
-    <section class="section section-alt">
-      <div class="container">
-        <div class="section-header">
-          <div>
-            <h2 class="section-title">Popular Worlds</h2>
-            <p class="section-subtitle">Download and explore custom worlds</p>
-          </div>
-          <Button variant="secondary" href="/worlds">View All</Button>
-        </div>
-
-        <div class="card-grid">
-          {#each featuredWorlds as world}
-            <BuildCard {...world} />
-          {/each}
-        </div>
-      </div>
-    </section>
-
     <!-- Servers Section -->
     <section class="section">
       <div class="container">
-        <div class="section-header">
-          <div>
-            <h2 class="section-title">Active Servers</h2>
-            <p class="section-subtitle">Find a server and start playing</p>
+        <div class="section-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Active Servers</h2>
+              <p class="section-subtitle">Find a server and start playing</p>
+            </div>
+            <Button variant="secondary" onclick={() => navigate('servers')}>View All</Button>
           </div>
-          <Button variant="secondary" onclick={() => navigate('servers')}>View All</Button>
-        </div>
 
-        <div class="server-grid">
-          {#each featuredServers as server}
-            <ServerCard
-              name={server.name}
-              slug={server.slug}
-              description={server.short_description || server.description}
-              players={server.current_players}
-              maxPlayers={server.max_players}
-              tags={server.tags}
-              online={server.status === 'online'}
-              icon={server.icon}
-              banner={server.banner}
-              source={server.source}
-              votes={server.total_votes}
-            />
-          {/each}
+          <div class="server-grid">
+            {#if loading}
+              {#each Array(4) as _}
+                <div class="skeleton-card server-skeleton"></div>
+              {/each}
+            {:else if featuredServers.length === 0}
+              <p class="empty-message">No servers available</p>
+            {:else}
+              {#each featuredServers as server}
+                <ServerCard
+                  name={server.name}
+                  slug={server.slug}
+                  description={server.short_description || server.description}
+                  players={server.current_players}
+                  maxPlayers={server.max_players}
+                  tags={server.tags}
+                  online={server.status === 'online'}
+                  icon={server.icon}
+                  banner={server.banner}
+                  source={server.source}
+                  votes={server.total_votes}
+                />
+              {/each}
+            {/if}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Featured Builds Section -->
+    <section class="section">
+      <div class="container">
+        <div class="section-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Featured Builds</h2>
+              <p class="section-subtitle">Discover amazing creations from the community</p>
+            </div>
+            <Button variant="secondary" onclick={() => navigate('builds')}>View All</Button>
+          </div>
+
+          <div class="card-grid">
+            {#if loading}
+              {#each Array(4) as _}
+                <div class="skeleton-card build-skeleton"></div>
+              {/each}
+            {:else if featuredBuilds.length === 0}
+              <p class="empty-message">No builds available</p>
+            {:else}
+              {#each featuredBuilds as build}
+                <BuildCard
+                  title={build.title}
+                  author={build.author?.username}
+                  thumbnail={build.thumbnail}
+                  tags={build.tags}
+                  downloads={build.download_count}
+                  blocks={build.block_count}
+                />
+              {/each}
+            {/if}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Popular Mods Section -->
+    <section class="section">
+      <div class="container">
+        <div class="section-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Popular Mods</h2>
+              <p class="section-subtitle">Enhance your game with community mods</p>
+            </div>
+            <Button variant="secondary" onclick={() => navigate('mods')}>View All</Button>
+          </div>
+
+          <div class="mod-grid">
+            {#if loading}
+              {#each Array(4) as _}
+                <div class="skeleton-card mod-skeleton"></div>
+              {/each}
+            {:else if popularMods.length === 0}
+              <p class="empty-message">No mods available</p>
+            {:else}
+              {#each popularMods as mod}
+                <ModCard
+                  title={mod.title}
+                  author={mod.author}
+                  iconUrl={mod.iconUrl}
+                  classification={mod.classification}
+                  downloads={mod.downloads}
+                  onclick={() => navigate(`mod-${mod.slug || mod.id}`)}
+                />
+              {/each}
+            {/if}
+          </div>
         </div>
       </div>
     </section>
 
     <!-- Forum Preview Section -->
-    <section class="section section-alt">
+    <section class="section">
       <div class="container">
-        <div class="section-header">
-          <div>
-            <h2 class="section-title">Community Forum</h2>
-            <p class="section-subtitle">Join the conversation</p>
+        <div class="section-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Community Forum</h2>
+              <p class="section-subtitle">Join the conversation</p>
+            </div>
+            <Button variant="secondary" onclick={() => navigate('forum')}>Visit Forum</Button>
           </div>
-          <Button variant="secondary" onclick={() => navigate('forum')}>Visit Forum</Button>
-        </div>
 
-        <Panel>
           <div class="forum-list">
-            {#each recentPosts as post, i}
-              {#if i > 0}
-                <div class="forum-divider"></div>
-              {/if}
-              <ForumPost {...post} />
-            {/each}
+            {#if loading}
+              {#each Array(3) as _}
+                <div class="skeleton-card forum-skeleton"></div>
+              {/each}
+            {:else if recentPosts.length === 0}
+              <p class="empty-message">No posts yet</p>
+            {:else}
+              {#each recentPosts as post, i}
+                {#if i > 0}
+                  <div class="forum-divider"></div>
+                {/if}
+                <ForumPost {...post} />
+              {/each}
+            {/if}
           </div>
-        </Panel>
+        </div>
       </div>
     </section>
 
     <!-- CTA Section -->
     <section class="section cta-section">
       <div class="container">
-        <Panel>
+        <div class="section-panel">
           <div class="cta-content">
             <h2 class="cta-title">Ready to Share Your Creations?</h2>
             <p class="cta-text">
@@ -236,7 +318,7 @@
               <Button variant="secondary">Learn More</Button>
             </div>
           </div>
-        </Panel>
+        </div>
       </div>
     </section>
   </main>
@@ -258,15 +340,17 @@
 
   .section {
     position: relative;
-    padding: 4rem 1.5rem;
+    padding: 3rem 1.5rem;
   }
 
-  .section-alt {
-    background:
-      radial-gradient(ellipse 80% 60% at 25% 30%, rgba(58, 48, 36, 0.4) 0%, transparent 50%),
-      radial-gradient(ellipse 70% 70% at 75% 70%, rgba(52, 42, 32, 0.35) 0%, transparent 45%),
-      radial-gradient(ellipse 50% 40% at 50% 50%, rgba(62, 52, 40, 0.25) 0%, transparent 50%),
-      linear-gradient(180deg, rgba(22, 18, 14, 0.8) 0%, rgba(18, 15, 12, 0.85) 50%, rgba(22, 18, 14, 0.8) 100%);
+  .section-panel {
+    background: linear-gradient(180deg, #2a241c 0%, #1e1a15 100%);
+    border: 1px solid #3d3428;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.03);
   }
 
   .container {
@@ -316,6 +400,24 @@
 
   @media (min-width: 1024px) {
     .card-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  .mod-grid {
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
+    gap: 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .mod-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .mod-grid {
       grid-template-columns: repeat(4, 1fr);
     }
   }
@@ -392,5 +494,44 @@
     .cta-buttons {
       flex-direction: row;
     }
+  }
+
+  /* Skeleton loading cards */
+  .skeleton-card {
+    background: linear-gradient(90deg, #2a241c 0%, #342c22 50%, #2a241c 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+    border: 1px solid #3d3428;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .server-skeleton {
+    height: 120px;
+  }
+
+  .build-skeleton {
+    height: 200px;
+  }
+
+  .mod-skeleton {
+    height: 80px;
+  }
+
+  .forum-skeleton {
+    height: 60px;
+    margin-bottom: 0.5rem;
+  }
+
+  .empty-message {
+    color: #6b5a48;
+    text-align: center;
+    padding: 2rem;
+    font-style: italic;
+    grid-column: 1 / -1;
   }
 </style>

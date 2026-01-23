@@ -16,10 +16,11 @@
   let showDeleteConfirm = $state(false)
   let deleting = $state(false)
 
-  // Check if current user is the author
+  // Check if current user is the author or admin
   const isAuthor = $derived(
     auth.isAuthenticated && build?.author?.id === auth.user?.id
   )
+  const canManage = $derived(isAuthor || auth.isAdmin)
 
   $effect(() => {
     if (buildSlug) {
@@ -306,7 +307,7 @@
               </Panel>
             {/if}
 
-            {#if isAuthor}
+            {#if canManage}
               <Panel>
                 <div class="manage-section">
                   <h3 class="section-label">Manage</h3>

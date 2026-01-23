@@ -9,22 +9,28 @@ let loading = $state(true)
 async function initialize() {
   loading = true
 
-  // Get current session
-  const { data: { session } } = await supabase.auth.getSession()
+  try {
+    // Get current session with timeout
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
-  if (session?.user) {
-    user = session.user
-    await fetchProfile()
+    if (sessionError) {
+      console.error('Error getting session:', sessionError)
+    } else if (session?.user) {
+      user = session.user
+      await fetchProfile().catch(e => console.error('Error fetching profile:', e))
+    }
+  } catch (e) {
+    console.error('Error initializing auth:', e)
+  } finally {
+    loading = false
   }
-
-  loading = false
 
   // Listen for auth changes
   supabase.auth.onAuthStateChange(async (event, session) => {
     user = session?.user || null
 
     if (user) {
-      await fetchProfile()
+      await fetchProfile().catch(e => console.error('Error fetching profile on auth change:', e))
     } else {
       profile = null
     }

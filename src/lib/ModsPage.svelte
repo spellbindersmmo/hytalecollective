@@ -34,17 +34,25 @@
   // Debounced search
   let searchTimeout = null
 
+  // Timeout wrapper
+  function withTimeout(promise, ms = 10000) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), ms))
+    ])
+  }
+
   async function loadMods() {
     loading = true
     error = null
     try {
-      const result = await searchProjects({
+      const result = await withTimeout(searchProjects({
         search,
         page: currentPage,
         size: pageSize,
         sort: sortBy,
         classification: classificationFilter
-      })
+      }))
       mods = result.projects
       totalCount = result.pagination.totalElements
       totalPages = result.pagination.totalPages
@@ -465,6 +473,11 @@
   .filter-group select:focus {
     outline: none;
     border-color: #6bb8cc;
+  }
+
+  .filter-group select option {
+    background: #2a241c;
+    color: #f0e6d8;
   }
 
   /* Results */

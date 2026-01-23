@@ -1,5 +1,40 @@
 <script>
+  import { onMount } from 'svelte'
   import Button from './Button.svelte'
+  import { supabase } from './supabase.js'
+
+  let { onnavigate = () => {} } = $props()
+
+  let stats = $state({ builds: 0, servers: 0, users: 0 })
+
+  onMount(async () => {
+    try {
+      const [
+        { count: buildsCount },
+        { count: serversCount },
+        { count: usersCount }
+      ] = await Promise.all([
+        supabase.from('builds').select('*', { count: 'exact', head: true }).eq('status', 'published'),
+        supabase.from('servers').select('*', { count: 'exact', head: true }),
+        supabase.from('profiles').select('*', { count: 'exact', head: true })
+      ])
+
+      stats = {
+        builds: buildsCount || 0,
+        servers: serversCount || 0,
+        users: usersCount || 0
+      }
+    } catch (e) {
+      console.error('Error fetching stats:', e)
+    }
+  })
+
+  function formatNumber(num) {
+    if (num >= 1000) {
+      return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
+    }
+    return num.toString()
+  }
 </script>
 
 <section class="hero">
@@ -20,28 +55,23 @@
     </p>
 
     <div class="hero-cta">
-      <Button variant="primary">Explore Builds</Button>
-      <Button variant="secondary">Find Servers</Button>
+      <Button variant="primary" onclick={() => onnavigate('builds')}>Explore Builds</Button>
+      <Button variant="secondary" onclick={() => onnavigate('servers')}>Find Servers</Button>
     </div>
 
     <div class="hero-stats">
       <div class="stat">
-        <div class="stat-value gold">2,500+</div>
+        <div class="stat-value gold">{formatNumber(stats.builds)}</div>
         <div class="stat-label">Builds</div>
       </div>
       <div class="stat-divider"></div>
       <div class="stat">
-        <div class="stat-value blue">450+</div>
-        <div class="stat-label">Worlds</div>
-      </div>
-      <div class="stat-divider"></div>
-      <div class="stat">
-        <div class="stat-value green">120+</div>
+        <div class="stat-value green">{formatNumber(stats.servers)}</div>
         <div class="stat-label">Servers</div>
       </div>
       <div class="stat-divider"></div>
       <div class="stat">
-        <div class="stat-value">15k+</div>
+        <div class="stat-value">{formatNumber(stats.users)}</div>
         <div class="stat-label">Members</div>
       </div>
     </div>
@@ -53,7 +83,7 @@
 <style>
   .hero {
     position: relative;
-    padding: 5rem 1.5rem;
+    padding: 2.5rem 1.5rem;
     overflow: hidden;
   }
 
@@ -101,10 +131,10 @@
   }
 
   .hero-title {
-    font-size: 2.5rem;
+    font-size: 2rem;
     font-weight: 700;
     color: #f0e6d8;
-    margin: 0 0 1.5rem 0;
+    margin: 0 0 0.75rem 0;
     line-height: 1.2;
     text-shadow:
       0 2px 4px rgba(0, 0, 0, 0.4),
@@ -113,7 +143,7 @@
 
   @media (min-width: 640px) {
     .hero-title {
-      font-size: 3.5rem;
+      font-size: 2.5rem;
     }
   }
 
@@ -127,9 +157,9 @@
   }
 
   .hero-subtitle {
-    font-size: 1.1rem;
+    font-size: 1rem;
     color: #c4b8a4;
-    margin: 0 0 2rem 0;
+    margin: 0 0 1.25rem 0;
     max-width: 36rem;
     margin-left: auto;
     margin-right: auto;
@@ -155,7 +185,7 @@
     justify-content: center;
     align-items: center;
     gap: 1.5rem;
-    margin-top: 4rem;
+    margin-top: 1.5rem;
     flex-wrap: wrap;
   }
 

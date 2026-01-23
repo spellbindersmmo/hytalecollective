@@ -120,6 +120,14 @@
                 </svg>
                 Settings
               </a>
+              {#if auth.isAdmin}
+                <a href="/admin" class="dropdown-item admin" onclick={(e) => { e.preventDefault(); closeUserMenu(); onnavigate('admin'); }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  </svg>
+                  Admin Panel
+                </a>
+              {/if}
               <div class="dropdown-divider"></div>
               <button class="dropdown-item logout" onclick={handleSignOut}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -170,6 +178,9 @@
         {#if auth.isAuthenticated}
           <a href="/profile" class="mobile-link" onclick={(e) => { e.preventDefault(); mobileMenuOpen = false; onnavigate(`profile-${auth.profile?.username}`); }}>Profile</a>
           <a href="/settings" class="mobile-link" onclick={(e) => { e.preventDefault(); mobileMenuOpen = false; onnavigate('settings'); }}>Settings</a>
+          {#if auth.isAdmin}
+            <a href="/admin" class="mobile-link admin" onclick={(e) => { e.preventDefault(); mobileMenuOpen = false; onnavigate('admin'); }}>Admin Panel</a>
+          {/if}
           <button class="mobile-link logout" onclick={handleSignOut}>Sign Out</button>
         {:else}
           <Button variant="ghost" onclick={openAuthModal}>Log In</Button>
@@ -542,5 +553,18 @@
     height: 1px;
     background: #3d3428;
     margin: 0.5rem 0;
+  }
+
+  .dropdown-item.admin {
+    color: #d4a44c;
+  }
+
+  .dropdown-item.admin:hover {
+    background: rgba(212, 164, 76, 0.15);
+    color: #f0d080;
+  }
+
+  .mobile-link.admin {
+    color: #d4a44c;
   }
 </style>
