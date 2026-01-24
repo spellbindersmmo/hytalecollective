@@ -1,6 +1,6 @@
 <script>
   import { auth } from './stores/auth.svelte.js'
-  import { getClient, ensureConnection } from './supabase.js'
+  import { getClient, uploadWithRetry } from './supabase.js'
   import { generateUniqueSlug, formatFileSize, isValidFileSize } from './utils.js'
   import Button from './Button.svelte'
   import Panel from './Panel.svelte'
@@ -256,9 +256,9 @@
     uploadProgress = 0
 
     try {
-      // Ensure connection is healthy before starting upload
+      // Get client (skip connection check - it can cause more issues than it solves)
       uploadProgress = 5
-      await ensureConnection()
+      const supabase = getClient()
 
       const userId = auth.user.id
       const slug = generateUniqueSlug(title)
@@ -280,27 +280,18 @@
       const bucketName = contentType === 'build' ? 'builds' : 'worlds'
       console.log('Uploading file:', { bucketName, filePath, size: file.size, type: contentTypeHeader })
 
-      // Add timeout for upload
-      const supabase = getClient()
-      const uploadPromise = supabase.storage
-        .from(bucketName)
-        .upload(filePath, file, {
-          contentType: contentTypeHeader,
-          upsert: false
-        })
-
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Upload timed out after 60 seconds. Check if the storage bucket exists and has correct permissions.')), 60000)
+      // Upload main file with automatic retry
+      const { data: fileData, error: fileError } = await uploadWithRetry(
+        bucketName,
+        filePath,
+        file,
+        { contentType: contentTypeHeader }
       )
 
-      const { error: fileError, data: fileData } = await Promise.race([uploadPromise, timeoutPromise])
-
-      console.log('Upload result:', { fileData, fileError })
-
       if (fileError) {
-        console.error('File upload error:', fileError)
         throw new Error(`Upload failed: ${fileError.message}`)
       }
+
       uploadProgress = 50
 
       // Upload thumbnail if provided
@@ -309,11 +300,17 @@
         const thumbExt = thumbnail.name.split('.').pop()
         thumbnailPath = `${userId}/${slug}-thumb-${timestamp}.${thumbExt}`
 
-        const { error: thumbError } = await supabase.storage
-          .from('thumbnails')
-          .upload(thumbnailPath, thumbnail)
+        const { error: thumbError } = await uploadWithRetry(
+          'thumbnails',
+          thumbnailPath,
+          thumbnail
+        )
 
-        if (thumbError) throw thumbError
+        if (thumbError) {
+          console.warn('Thumbnail upload failed:', thumbError.message)
+          // Don't fail the whole upload for thumbnail issues
+          thumbnailPath = null
+        }
       }
       uploadProgress = 70
 
