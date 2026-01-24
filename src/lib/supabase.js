@@ -7,7 +7,7 @@ if (!supabaseUrl || !supabaseKey) {
   console.warn('Missing Supabase environment variables. Check your .env file.')
 }
 
-// Create a fresh Supabase client
+// Create the Supabase client
 function createSupabaseClient() {
   return createClient(supabaseUrl || '', supabaseKey || '', {
     auth: {
@@ -18,7 +18,8 @@ function createSupabaseClient() {
     global: {
       headers: {
         'x-client-info': 'hytale-collective'
-      }
+      },
+      fetch: fetchWithRetry
     },
     // Disable realtime to reduce connection overhead
     realtime: {
@@ -29,90 +30,60 @@ function createSupabaseClient() {
   })
 }
 
-// Main client instance
-let client = createSupabaseClient()
-
-// Track consecutive failures to detect stuck state
-let consecutiveFailures = 0
-const MAX_FAILURES_BEFORE_RESET = 2
-
-// Get the current client - use this instead of direct import
-export function getClient() {
-  return client
-}
-
-// For backward compatibility - but prefer getClient() for dynamic access
-export const supabase = client
-
-// Reset the client when it gets into a bad state
-export function resetClient() {
-  console.log('Resetting Supabase client...')
-  consecutiveFailures = 0
-  client = createSupabaseClient()
-  return client
-}
-
-// Call this on successful requests
-export function markSuccess() {
-  consecutiveFailures = 0
-}
-
-// Call this on failed requests - returns true if client was reset
-export function markFailure() {
-  consecutiveFailures++
-  console.warn(`Supabase failure ${consecutiveFailures}/${MAX_FAILURES_BEFORE_RESET}`)
-
-  if (consecutiveFailures >= MAX_FAILURES_BEFORE_RESET) {
-    resetClient()
-    return true
-  }
-  return false
-}
-
-// Wrapper for fetch operations with automatic retry and client reset
-export async function withRetry(operation, maxRetries = 2) {
-  let lastError = null
+// Custom fetch with automatic retry for failed requests
+async function fetchWithRetry(url, options = {}) {
+  const maxRetries = 2
+  const baseDelay = 1000
+  let lastError
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      // Use the current client
-      const result = await operation(client)
-      markSuccess()
-      return result
-    } catch (e) {
-      lastError = e
-      console.warn(`Operation attempt ${attempt + 1} failed:`, e.message)
+      const response = await fetch(url, {
+        ...options,
+        // Add a reasonable timeout via AbortController if not already set
+        signal: options.signal || AbortSignal.timeout(60000)
+      })
 
-      // Mark the failure and check if client was reset
-      const wasReset = markFailure()
+      // If we get a response (even an error response), return it
+      // Let Supabase handle the error parsing
+      return response
 
-      if (attempt < maxRetries) {
-        // If client was reset, retry immediately with new client
-        // Otherwise wait a bit before retrying
-        if (!wasReset) {
-          await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)))
-        }
+    } catch (err) {
+      lastError = err
+      const isTimeout = err.name === 'TimeoutError' || err.name === 'AbortError'
+      const isNetworkError = err.message?.includes('fetch') || err.message?.includes('network')
+
+      console.warn(`Fetch attempt ${attempt + 1}/${maxRetries + 1} failed:`, err.message)
+
+      // Don't retry if it was intentionally aborted (not timeout)
+      if (err.name === 'AbortError' && !isTimeout) {
+        throw err
       }
+
+      // Retry on timeout or network errors
+      if (attempt < maxRetries && (isTimeout || isNetworkError)) {
+        const delay = baseDelay * Math.pow(2, attempt) // Exponential backoff
+        console.log(`Retrying in ${delay}ms...`)
+        await new Promise(resolve => setTimeout(resolve, delay))
+        continue
+      }
+
+      throw err
     }
   }
 
   throw lastError
 }
 
-// Simple health check - returns new client if check fails
-export async function ensureConnection() {
-  try {
-    const { error } = await client.from('profiles').select('id').limit(1).maybeSingle()
-    if (!error) {
-      markSuccess()
-      return client
-    }
-    // If error, reset and return new client
-    return resetClient()
-  } catch (e) {
-    // If exception, reset and return new client
-    return resetClient()
-  }
+// Single client instance
+const client = createSupabaseClient()
+
+// Export the client
+export const supabase = client
+
+// Also export as getClient for compatibility
+export function getClient() {
+  return client
 }
 
 // Helper to get public URL for storage files
@@ -122,7 +93,85 @@ export function getStorageUrl(bucket, path) {
   return data.publicUrl
 }
 
-// Helper for file uploads with progress tracking
+// Query helper with retry logic for database operations
+export async function queryWithRetry(queryFn, maxRetries = 2) {
+  let lastError
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await queryFn(client)
+
+      // Check for Supabase-level errors
+      if (result.error) {
+        // Don't retry on auth/permission errors
+        if (result.error.code === 'PGRST301' || result.error.code === '42501') {
+          return result
+        }
+        throw result.error
+      }
+
+      return result
+
+    } catch (err) {
+      lastError = err
+      console.warn(`Query attempt ${attempt + 1}/${maxRetries + 1} failed:`, err.message)
+
+      if (attempt < maxRetries) {
+        const delay = 1000 * (attempt + 1)
+        console.log(`Retrying query in ${delay}ms...`)
+        await new Promise(resolve => setTimeout(resolve, delay))
+        continue
+      }
+    }
+  }
+
+  return { data: null, error: lastError }
+}
+
+// Storage upload helper with retry logic
+export async function uploadWithRetry(bucket, path, file, options = {}, maxRetries = 2) {
+  let lastError
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`Upload attempt ${attempt + 1}/${maxRetries + 1} to ${bucket}/${path}`)
+
+      const { data, error } = await client.storage
+        .from(bucket)
+        .upload(path, file, {
+          cacheControl: '3600',
+          upsert: false,
+          ...options
+        })
+
+      if (error) {
+        // Don't retry on duplicate/conflict errors
+        if (error.statusCode === 409 || error.message?.includes('duplicate')) {
+          return { data: null, error }
+        }
+        throw error
+      }
+
+      console.log('Upload successful:', path)
+      return { data, error: null }
+
+    } catch (err) {
+      lastError = err
+      console.warn(`Upload attempt ${attempt + 1}/${maxRetries + 1} failed:`, err.message)
+
+      if (attempt < maxRetries) {
+        const delay = 2000 * (attempt + 1)
+        console.log(`Retrying upload in ${delay}ms...`)
+        await new Promise(resolve => setTimeout(resolve, delay))
+        continue
+      }
+    }
+  }
+
+  return { data: null, error: lastError }
+}
+
+// Helper for file uploads (uses retry logic internally via custom fetch)
 export async function uploadFile(bucket, path, file, onProgress) {
   const { data, error } = await client.storage
     .from(bucket)
@@ -135,17 +184,8 @@ export async function uploadFile(bucket, path, file, onProgress) {
   return data
 }
 
-// Helper for resumable uploads (large files)
-export async function uploadLargeFile(bucket, path, file) {
-  const { data, error } = await client.storage
-    .from(bucket)
-    .upload(path, file, {
-      cacheControl: '3600',
-      upsert: false,
-      // TUS protocol for resumable uploads
-      duplex: 'half'
-    })
-
-  if (error) throw error
-  return data
-}
+// Legacy exports for backward compatibility
+export function markSuccess() {}
+export function markFailure() { return false }
+export function resetClient() { return client }
+export async function ensureConnection() { return client }
