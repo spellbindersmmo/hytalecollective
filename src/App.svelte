@@ -24,6 +24,7 @@
   import BuildsPage from './lib/BuildsPage.svelte'
   import BuildDetailPage from './lib/BuildDetailPage.svelte'
   import AdminPage from './lib/AdminPage.svelte'
+  import ReportPage from './lib/ReportPage.svelte'
   import { auth } from './lib/stores/auth.svelte.js'
   import {
     fetchFeaturedBuilds,
@@ -161,6 +162,8 @@
 
 {#if currentPage === 'admin'}
   <AdminPage onnavigate={navigate} />
+{:else if currentPage === 'report'}
+  <ReportPage onnavigate={navigate} />
 {:else if currentPage === 'upload'}
   <UploadPage onnavigate={navigate} />
 {:else if currentPage === 'forum'}

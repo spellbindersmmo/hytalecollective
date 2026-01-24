@@ -1,6 +1,6 @@
 <script>
   import { auth } from './stores/auth.svelte.js'
-  import { supabase } from './supabase.js'
+  import { getClient, ensureConnection } from './supabase.js'
   import { generateUniqueSlug, formatFileSize, isValidFileSize } from './utils.js'
   import Button from './Button.svelte'
   import Panel from './Panel.svelte'
@@ -64,7 +64,7 @@
   })
 
   async function fetchTags() {
-    const { data, error: err } = await supabase
+    const { data, error: err } = await getClient()
       .from('tags')
       .select('*')
       .order('usage_count', { ascending: false })
@@ -256,6 +256,10 @@
     uploadProgress = 0
 
     try {
+      // Ensure connection is healthy before starting upload
+      uploadProgress = 5
+      await ensureConnection()
+
       const userId = auth.user.id
       const slug = generateUniqueSlug(title)
       const timestamp = Date.now()
@@ -277,6 +281,7 @@
       console.log('Uploading file:', { bucketName, filePath, size: file.size, type: contentTypeHeader })
 
       // Add timeout for upload
+      const supabase = getClient()
       const uploadPromise = supabase.storage
         .from(bucketName)
         .upload(filePath, file, {
