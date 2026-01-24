@@ -19,7 +19,7 @@
       { label: 'Help Center', href: '/help' },
       { label: 'Guidelines', href: '/guidelines' },
       { label: 'Contact', href: '/contact' },
-      { label: 'Report Issue', href: '/report' }
+      { label: 'Report Issue', page: 'report' }
     ]
   }
 
