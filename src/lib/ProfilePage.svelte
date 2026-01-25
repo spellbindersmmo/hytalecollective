@@ -291,7 +291,7 @@
                     thumbnail={build.thumbnail}
                     tags={build.tags}
                     downloads={build.download_count}
-                    blocks={build.block_count}
+                    views={build.view_count}
                     votes={build.total_votes}
                   />
                 {/each}

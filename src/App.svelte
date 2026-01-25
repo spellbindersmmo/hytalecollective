@@ -412,6 +412,7 @@
     box-shadow:
       0 4px 12px rgba(0, 0, 0, 0.3),
       inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    overflow: hidden;
   }
 
   .container {
@@ -489,9 +490,20 @@
     gap: 1rem;
   }
 
-  @media (min-width: 768px) {
+  .server-grid > :global(*) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  @media (min-width: 640px) {
     .server-grid {
       grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .server-grid {
+      grid-template-columns: repeat(4, 1fr);
     }
   }
 

@@ -24,6 +24,7 @@
   let showDeleteConfirm = $state(false)
   let deleting = $state(false)
   let replyTextarea = $state(null)
+  let togglingPin = $state(false)
 
   // Header image for guides
   const isGuide = $derived(post?.category?.slug === 'guides')
@@ -88,6 +89,16 @@
   // Check if current user is the post author
   const isAuthor = $derived(
     auth.isAuthenticated && post && auth.user?.id === post.author?.id
+  )
+
+  // Check if this is a news/announcements post (only admins can comment)
+  const isNewsCategory = $derived(
+    post?.category?.slug === 'news' || post?.category?.slug === 'news-and-announcements'
+  )
+
+  // Check if user can reply (not news category, or user is admin)
+  const canReply = $derived(
+    !isNewsCategory || auth.isAdmin
   )
 
   onMount(() => {
@@ -319,6 +330,29 @@
       deleting = false
     }
   }
+
+  async function togglePin() {
+    if (!auth.isAdmin || togglingPin) return
+
+    togglingPin = true
+    error = null
+
+    try {
+      const { error: updateError } = await supabase
+        .from('forum_posts')
+        .update({ is_pinned: !post.is_pinned })
+        .eq('id', post.id)
+
+      if (updateError) throw updateError
+
+      // Update local state
+      post.is_pinned = !post.is_pinned
+    } catch (e) {
+      error = e.message
+    } finally {
+      togglingPin = false
+    }
+  }
 </script>
 
 <div class="page">
@@ -385,22 +419,41 @@
                     <span class="locked-badge">Locked</span>
                   {/if}
                 </div>
-                {#if isAuthor && !editing}
+                {#if (isAuthor || auth.isAdmin) && !editing}
                   <div class="post-actions">
-                    <button class="action-btn edit-btn" onclick={startEditing} title="Edit post">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                      </svg>
-                      Edit
-                    </button>
-                    <button class="action-btn delete-btn" onclick={confirmDelete} title="Delete post">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                      </svg>
-                      Delete
-                    </button>
+                    {#if auth.isAdmin}
+                      <button
+                        class="action-btn pin-btn"
+                        class:pinned={post.is_pinned}
+                        onclick={togglePin}
+                        title={post.is_pinned ? "Unpin post" : "Pin post"}
+                        disabled={togglingPin}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M12 2L12 12" />
+                          <path d="M18.5 8.5L12 12L5.5 8.5" />
+                          <path d="M12 12L12 22" />
+                          <circle cx="12" cy="5" r="3" />
+                        </svg>
+                        {togglingPin ? '...' : post.is_pinned ? 'Unpin' : 'Pin'}
+                      </button>
+                    {/if}
+                    {#if isAuthor}
+                      <button class="action-btn edit-btn" onclick={startEditing} title="Edit post">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                        Edit
+                      </button>
+                      <button class="action-btn delete-btn" onclick={confirmDelete} title="Delete post">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                        Delete
+                      </button>
+                    {/if}
                   </div>
                 {/if}
               </div>
@@ -506,7 +559,7 @@
         {/if}
 
         <!-- Reply Form -->
-        {#if !post.is_locked}
+        {#if !post.is_locked && canReply}
           <section class="reply-form-section">
             <h2 class="form-title">Leave a Reply</h2>
 
@@ -586,7 +639,7 @@
               </Panel>
             {/if}
           </section>
-        {:else}
+        {:else if post.is_locked}
           <Panel>
             <div class="locked-notice">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -594,6 +647,15 @@
                 <path d="M7 11V7a5 5 0 0 1 10 0v4" />
               </svg>
               <p>This post has been locked and no longer accepts new replies.</p>
+            </div>
+          </Panel>
+        {:else if isNewsCategory && !auth.isAdmin}
+          <Panel>
+            <div class="locked-notice">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+              <p>Only administrators can comment on news and announcements.</p>
             </div>
           </Panel>
         {/if}
@@ -747,6 +809,17 @@
   .action-btn.delete-btn:hover {
     border-color: #c46b6b;
     color: #e8a0a0;
+  }
+
+  .action-btn.pin-btn.pinned {
+    background: rgba(212, 164, 76, 0.15);
+    border-color: #d4a44c;
+    color: #d4a44c;
+  }
+
+  .action-btn.pin-btn:hover {
+    border-color: #d4a44c;
+    color: #e8c36b;
   }
 
   .edit-title-input {

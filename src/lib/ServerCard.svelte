@@ -179,6 +179,8 @@
     align-items: flex-start;
     gap: 1rem;
     padding: 1rem;
+    height: 11rem;
+    overflow: hidden;
     background:
       radial-gradient(ellipse 50% 60% at 20% 30%, rgba(65, 55, 42, 0.25) 0%, transparent 60%),
       radial-gradient(ellipse 60% 50% at 80% 70%, rgba(58, 48, 38, 0.2) 0%, transparent 50%),

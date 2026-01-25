@@ -276,7 +276,9 @@
                 {/if}
 
                 {#if !auth.isAuthenticated}
-                  <p class="vote-hint">Login to vote for this server</p>
+                  <button class="vote-hint-btn" onclick={() => auth.openModal()}>
+                    Login to vote for this server
+                  </button>
                 {/if}
               </div>
             </Panel>
@@ -703,11 +705,23 @@
     margin: 0.5rem 0 0;
   }
 
-  .vote-hint {
+  .vote-hint-btn {
+    display: block;
+    width: 100%;
+    padding: 0.5rem;
     font-size: 0.8rem;
-    color: #6a5a4a;
+    color: #d4a44c;
+    background: none;
+    border: none;
     text-align: center;
     margin: 0.5rem 0 0;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+
+  .vote-hint-btn:hover {
+    color: #e8c36b;
+    text-decoration: underline;
   }
 
   /* Links */
