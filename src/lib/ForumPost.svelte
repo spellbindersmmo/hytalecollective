@@ -5,7 +5,9 @@
     category = 'General',
     replies = 0,
     views = 0,
-    lastActivity = 'Just now'
+    lastActivity = 'Just now',
+    slug = '',
+    onclick = null
   } = $props()
 
   const categoryColors = {
@@ -17,9 +19,17 @@
   }
 
   let colors = $derived(categoryColors[category] || categoryColors['General'])
+
+  function handleClick() {
+    if (onclick) {
+      onclick()
+    } else if (slug && typeof window !== 'undefined' && window.navigate) {
+      window.navigate(`forum-post-${slug}`)
+    }
+  }
 </script>
 
-<div class="forum-post">
+<div class="forum-post" onclick={handleClick} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && handleClick()}>
   <div class="post-main">
     <div class="post-category">
       <span class="category-badge" style="background: {colors.bg}; color: {colors.text}; border-color: {colors.text}40;">
