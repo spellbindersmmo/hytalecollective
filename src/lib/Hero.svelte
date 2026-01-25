@@ -5,17 +5,8 @@
 
   let { onnavigate = () => {} } = $props()
 
-  // Load cached stats from localStorage or default to 0
-  function getCachedStats() {
-    if (typeof localStorage === 'undefined') return { builds: 0, servers: 0, users: 0 }
-    try {
-      const cached = localStorage.getItem('heroStats')
-      if (cached) return JSON.parse(cached)
-    } catch (e) {}
-    return { builds: 0, servers: 0, users: 0 }
-  }
-
-  let stats = $state(getCachedStats())
+  let stats = $state({ builds: 0, servers: 0, users: 0 })
+  let loading = $state(true)
 
   onMount(async () => {
     try {
@@ -34,11 +25,10 @@
         servers: serversCount || 0,
         users: usersCount || 0
       }
-
-      // Cache stats for next page load
-      localStorage.setItem('heroStats', JSON.stringify(stats))
     } catch (e) {
       console.error('Error fetching stats:', e)
+    } finally {
+      loading = false
     }
   })
 
@@ -74,17 +64,35 @@
 
     <div class="hero-stats">
       <div class="stat">
-        <div class="stat-value gold">{formatNumber(stats.builds)}</div>
+        <div class="stat-value gold">
+          {#if loading}
+            <span class="stat-loader"></span>
+          {:else}
+            {formatNumber(stats.builds)}
+          {/if}
+        </div>
         <div class="stat-label">Builds</div>
       </div>
       <div class="stat-divider"></div>
       <div class="stat">
-        <div class="stat-value green">{formatNumber(stats.servers)}</div>
+        <div class="stat-value green">
+          {#if loading}
+            <span class="stat-loader"></span>
+          {:else}
+            {formatNumber(stats.servers)}
+          {/if}
+        </div>
         <div class="stat-label">Servers</div>
       </div>
       <div class="stat-divider"></div>
       <div class="stat">
-        <div class="stat-value">{formatNumber(stats.users + 30)}</div>
+        <div class="stat-value">
+          {#if loading}
+            <span class="stat-loader"></span>
+          {:else}
+            {formatNumber(stats.users + 30)}
+          {/if}
+        </div>
         <div class="stat-label">Members</div>
       </div>
     </div>
@@ -256,6 +264,20 @@
     letter-spacing: 0.1em;
     margin-top: 0.25rem;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+
+  .stat-loader {
+    display: inline-block;
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 2px solid rgba(196, 184, 164, 0.3);
+    border-top-color: #c4b8a4;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 
   .stat-divider {
