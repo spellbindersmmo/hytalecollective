@@ -21,7 +21,13 @@
       "WebFetch(domain:modtale.net)",
       "WebFetch(domain:api.modtale.net)",
       "WebFetch(domain:github.com)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "WebFetch(domain:supabase.com)",
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:dev.to)",
+      "Bash(npm run build:*)",
+      "Bash(npx vite build:*)",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }
