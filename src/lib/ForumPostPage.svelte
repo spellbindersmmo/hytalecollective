@@ -432,10 +432,10 @@
       .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
 
       // Images with size (must be before regular images)
-      .replace(/!\[([^\]]*)\]\(([^)#]+)#(small|medium|large)\)/g, '<img src="$2" alt="$1" class="md-image md-image-$3" />')
+      .replace(/!\[([^\]]*)\]\(([^)#]+)#(small|medium|large)\)/g, '<img src="$2" alt="$1" class="md-image md-image-$3" loading="lazy" decoding="async" />')
 
       // Images (must be before links since ![alt](url) contains [alt](url))
-      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-image" />')
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-image" loading="lazy" decoding="async" />')
 
       // Links
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
@@ -597,7 +597,7 @@
         <!-- Guide Header Image -->
         {#if isGuide && headerImageUrl}
           <div class="guide-header">
-            <img src={headerImageUrl} alt="" class="guide-header-image" />
+            <img src={headerImageUrl} alt="" class="guide-header-image" decoding="async" />
             <div class="guide-header-overlay">
               <span class="guide-badge">Guide</span>
               <h1 class="guide-header-title">{post.title}</h1>
@@ -683,7 +683,7 @@
               <aside class="author-card">
                 <div class="avatar">
                   {#if post.author.avatar_url}
-                    <img src={post.author.avatar_url} alt="" />
+                    <img src={post.author.avatar_url} alt="" decoding="async" />
                   {:else}
                     <span>{post.author.username.charAt(0).toUpperCase()}</span>
                   {/if}
@@ -875,7 +875,7 @@
                   <aside class="author-card compact">
                     <div class="avatar small">
                       {#if reply.author.avatar_url}
-                        <img src={reply.author.avatar_url} alt="" />
+                        <img src={reply.author.avatar_url} alt="" loading="lazy" decoding="async" />
                       {:else}
                         <span>{reply.author.username.charAt(0).toUpperCase()}</span>
                       {/if}
@@ -1420,6 +1420,8 @@
     color: #c4b8a4;
     line-height: 1.7;
     word-wrap: break-word;
+    /* Performance: Contain content rendering */
+    contain: layout style;
   }
 
   /* Markdown Styles */
@@ -1473,6 +1475,9 @@
     border-radius: 6px;
     margin: 0.5rem 0;
     border: 1px solid #3d3428;
+    /* Performance: Isolate image rendering */
+    contain: layout style paint;
+    content-visibility: auto;
   }
 
   .markdown-content :global(.md-image-small) {
@@ -1634,6 +1639,12 @@
     display: flex;
     flex-direction: column;
     gap: 1rem;
+  }
+
+  /* Performance: Skip rendering off-screen replies */
+  .replies-section > :global(*) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 200px;
   }
 
   .replies-title {
