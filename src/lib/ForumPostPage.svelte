@@ -24,7 +24,15 @@
   let showDeleteConfirm = $state(false)
   let deleting = $state(false)
   let replyTextarea = $state(null)
+  let editTextarea = $state(null)
   let togglingPin = $state(false)
+  let showEditPreview = $state(false)
+
+  // Post reference modal for editing
+  let showPostRefModal = $state(false)
+  let postRefSearch = $state('')
+  let postRefResults = $state([])
+  let searchingPosts = $state(false)
 
   // Header image for guides
   const isGuide = $derived(post?.category?.slug === 'guides')
@@ -86,6 +94,165 @@
     }, 0)
   }
 
+  // Formatting functions for edit textarea
+  function editInsertFormat(before, after = before) {
+    if (!editTextarea) return
+
+    const start = editTextarea.selectionStart
+    const end = editTextarea.selectionEnd
+    const selectedText = editContent.substring(start, end)
+    const newText = before + selectedText + after
+
+    editContent = editContent.substring(0, start) + newText + editContent.substring(end)
+
+    setTimeout(() => {
+      editTextarea.focus()
+      if (selectedText) {
+        editTextarea.setSelectionRange(start + before.length, end + before.length)
+      } else {
+        editTextarea.setSelectionRange(start + before.length, start + before.length)
+      }
+    }, 0)
+  }
+
+  function editInsertLineFormat(prefix) {
+    if (!editTextarea) return
+
+    const start = editTextarea.selectionStart
+    const end = editTextarea.selectionEnd
+    const selectedText = editContent.substring(start, end)
+    const beforeSelection = editContent.substring(0, start)
+    const lineStart = beforeSelection.lastIndexOf('\n') + 1
+
+    if (selectedText.includes('\n')) {
+      const lines = selectedText.split('\n')
+      const formatted = lines.map(line => prefix + line).join('\n')
+      editContent = editContent.substring(0, start) + formatted + editContent.substring(end)
+    } else {
+      editContent = editContent.substring(0, lineStart) + prefix + editContent.substring(lineStart)
+    }
+
+    setTimeout(() => {
+      editTextarea.focus()
+    }, 0)
+  }
+
+  function editInsertLink() {
+    if (!editTextarea) return
+
+    const start = editTextarea.selectionStart
+    const end = editTextarea.selectionEnd
+    const selectedText = editContent.substring(start, end)
+
+    const linkText = selectedText || 'link text'
+    const newText = `[${linkText}](url)`
+
+    editContent = editContent.substring(0, start) + newText + editContent.substring(end)
+
+    setTimeout(() => {
+      editTextarea.focus()
+      const urlStart = start + linkText.length + 3
+      editTextarea.setSelectionRange(urlStart, urlStart + 3)
+    }, 0)
+  }
+
+  function editInsertHorizontalRule() {
+    if (!editTextarea) return
+
+    const start = editTextarea.selectionStart
+    const beforeCursor = editContent.substring(0, start)
+    const needsNewlineBefore = beforeCursor.length > 0 && !beforeCursor.endsWith('\n')
+    const rule = (needsNewlineBefore ? '\n' : '') + '---\n'
+
+    editContent = editContent.substring(0, start) + rule + editContent.substring(start)
+
+    setTimeout(() => {
+      editTextarea.focus()
+      const newPosition = start + rule.length
+      editTextarea.setSelectionRange(newPosition, newPosition)
+    }, 0)
+  }
+
+  // Post reference search for editing
+  let searchTimeout = null
+  let searchError = $state(null)
+
+  async function searchPosts(query) {
+    if (!query.trim()) {
+      postRefResults = []
+      searchError = null
+      return
+    }
+
+    searchingPosts = true
+    searchError = null
+
+    try {
+      const { data, error: queryError } = await supabase
+        .from('forum_posts')
+        .select(`
+          id, title, slug,
+          category:forum_categories(name, color)
+        `)
+        .ilike('title', `%${query}%`)
+        .neq('slug', postSlug) // Exclude current post
+        .limit(10)
+
+      if (queryError) {
+        console.error('Search error:', queryError)
+        searchError = queryError.message
+        postRefResults = []
+      } else {
+        postRefResults = data || []
+      }
+    } catch (e) {
+      console.error('Error searching posts:', e)
+      searchError = e.message
+      postRefResults = []
+    } finally {
+      searchingPosts = false
+    }
+  }
+
+  function handlePostRefSearchInput(e) {
+    const query = e.target.value
+    postRefSearch = query
+
+    if (searchTimeout) clearTimeout(searchTimeout)
+    searchTimeout = setTimeout(() => searchPosts(query), 300)
+  }
+
+  function insertPostReference(refPost) {
+    if (!editTextarea) return
+
+    const start = editTextarea.selectionStart
+    const refText = `{{ref:${refPost.slug}|${refPost.title}|${refPost.category.name}|${refPost.category.color}}}`
+
+    editContent = editContent.substring(0, start) + refText + editContent.substring(start)
+
+    showPostRefModal = false
+    postRefSearch = ''
+    postRefResults = []
+
+    setTimeout(() => {
+      editTextarea.focus()
+      const newPosition = start + refText.length
+      editTextarea.setSelectionRange(newPosition, newPosition)
+    }, 0)
+  }
+
+  function openPostRefModal() {
+    showPostRefModal = true
+    postRefSearch = ''
+    postRefResults = []
+  }
+
+  function closePostRefModal() {
+    showPostRefModal = false
+    postRefSearch = ''
+    postRefResults = []
+  }
+
   // Check if current user is the post author
   const isAuthor = $derived(
     auth.isAuthenticated && post && auth.user?.id === post.author?.id
@@ -101,8 +268,42 @@
     !isNewsCategory || auth.isAdmin
   )
 
+  // Track previous slug to detect changes
+  let prevSlug = $state(postSlug)
+
+  // React to postSlug changes - reload post when navigating to different post
+  $effect(() => {
+    if (postSlug && postSlug !== prevSlug) {
+      prevSlug = postSlug
+      // Reset state for new post
+      post = null
+      replies = []
+      editing = false
+      showEditPreview = false
+      // Scroll to top when navigating to new post
+      window.scrollTo(0, 0)
+      loadPost()
+    }
+  })
+
   onMount(() => {
     loadPost()
+
+    // Handle clicks on post references using event delegation
+    function handlePostRefClick(e) {
+      const refLink = e.target.closest('[data-post-ref]')
+      if (refLink) {
+        e.preventDefault()
+        e.stopPropagation()
+        const refSlug = refLink.getAttribute('data-post-ref')
+        if (refSlug) {
+          onnavigate(`forum-post-${refSlug}`)
+        }
+      }
+    }
+
+    document.addEventListener('click', handlePostRefClick)
+    return () => document.removeEventListener('click', handlePostRefClick)
   })
 
   async function loadPost() {
@@ -247,6 +448,15 @@
 
       // Numbered lists
       .replace(/^\d+\. (.+)$/gm, '<li class="md-numbered">$1</li>')
+
+      // Post references - {{ref:slug|title|category|color}}
+      .replace(/\{\{ref:([^|]+)\|([^|]+)\|([^|]+)\|([^}]+)\}\}/g, (match, refSlug, title, category, color) => {
+        return `<a href="#" class="post-reference" data-post-ref="${refSlug}">
+          <span class="post-ref-category" style="background: ${color}20; color: ${color}; border-color: ${color}40;">${category}</span>
+          <span class="post-ref-title">${title}</span>
+          <span class="post-ref-arrow">→</span>
+        </a>`
+      })
 
       // Line breaks
       .replace(/\n/g, '<br />')
@@ -487,12 +697,144 @@
               <div class="content-area">
                 {#if editing}
                   <div class="edit-form">
-                    <textarea
-                      class="edit-content-input"
-                      bind:value={editContent}
-                      placeholder="Post content"
-                      rows="8"
-                    ></textarea>
+                    <!-- Formatting Toolbar -->
+                    <div class="editor-toolbar">
+                      <div class="toolbar-group">
+                        <button type="button" class="toolbar-btn" title="Bold" onclick={() => editInsertFormat('**')}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z" />
+                            <path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z" />
+                          </svg>
+                        </button>
+                        <button type="button" class="toolbar-btn" title="Italic" onclick={() => editInsertFormat('*')}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="19" y1="4" x2="10" y2="4" />
+                            <line x1="14" y1="20" x2="5" y2="20" />
+                            <line x1="15" y1="4" x2="9" y2="20" />
+                          </svg>
+                        </button>
+                        <button type="button" class="toolbar-btn" title="Strikethrough" onclick={() => editInsertFormat('~~')}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M17.3 4.9c-2.3-.6-4.4-1-6.2-.9-2.7 0-5.3.7-5.3 3.6 0 1.5 1.8 3.3 3.6 3.9h.2m8.2 0c1.1.5 1.6 1.8 1.6 3.1 0 3.6-3.3 4.5-6.8 4.5-1.3 0-2.6-.1-3.9-.3" />
+                            <line x1="4" y1="12" x2="20" y2="12" />
+                          </svg>
+                        </button>
+                        <button type="button" class="toolbar-btn" title="Underline" onclick={() => editInsertFormat('++')}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3" />
+                            <line x1="4" y1="21" x2="20" y2="21" />
+                          </svg>
+                        </button>
+                      </div>
+
+                      <div class="toolbar-divider"></div>
+
+                      <div class="toolbar-group">
+                        <button type="button" class="toolbar-btn" title="Heading 1" onclick={() => editInsertLineFormat('# ')}>
+                          <span class="toolbar-text">H1</span>
+                        </button>
+                        <button type="button" class="toolbar-btn" title="Heading 2" onclick={() => editInsertLineFormat('## ')}>
+                          <span class="toolbar-text">H2</span>
+                        </button>
+                        <button type="button" class="toolbar-btn" title="Heading 3" onclick={() => editInsertLineFormat('### ')}>
+                          <span class="toolbar-text">H3</span>
+                        </button>
+                      </div>
+
+                      <div class="toolbar-divider"></div>
+
+                      <div class="toolbar-group">
+                        <button type="button" class="toolbar-btn" title="Bullet List" onclick={() => editInsertLineFormat('- ')}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="9" y1="6" x2="20" y2="6" />
+                            <line x1="9" y1="12" x2="20" y2="12" />
+                            <line x1="9" y1="18" x2="20" y2="18" />
+                            <circle cx="4" cy="6" r="1.5" fill="currentColor" />
+                            <circle cx="4" cy="12" r="1.5" fill="currentColor" />
+                            <circle cx="4" cy="18" r="1.5" fill="currentColor" />
+                          </svg>
+                        </button>
+                        <button type="button" class="toolbar-btn" title="Numbered List" onclick={() => editInsertLineFormat('1. ')}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="10" y1="6" x2="21" y2="6" />
+                            <line x1="10" y1="12" x2="21" y2="12" />
+                            <line x1="10" y1="18" x2="21" y2="18" />
+                            <text x="3" y="8" font-size="6" fill="currentColor" font-family="sans-serif">1</text>
+                            <text x="3" y="14" font-size="6" fill="currentColor" font-family="sans-serif">2</text>
+                            <text x="3" y="20" font-size="6" fill="currentColor" font-family="sans-serif">3</text>
+                          </svg>
+                        </button>
+                      </div>
+
+                      <div class="toolbar-divider"></div>
+
+                      <div class="toolbar-group">
+                        <button type="button" class="toolbar-btn" title="Insert Link" onclick={editInsertLink}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                          </svg>
+                        </button>
+                        <button type="button" class="toolbar-btn" title="Reference Another Post" onclick={openPostRefModal}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="16" y1="13" x2="8" y2="13" />
+                            <line x1="16" y1="17" x2="8" y2="17" />
+                            <polyline points="10 9 9 9 8 9" />
+                          </svg>
+                        </button>
+                        <button type="button" class="toolbar-btn" title="Quote" onclick={() => editInsertLineFormat('> ')}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z" />
+                            <path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3z" />
+                          </svg>
+                        </button>
+                        <button type="button" class="toolbar-btn" title="Code Block" onclick={() => editInsertFormat('```\n', '\n```')}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="16 18 22 12 16 6" />
+                            <polyline points="8 6 2 12 8 18" />
+                          </svg>
+                        </button>
+                        <button type="button" class="toolbar-btn" title="Horizontal Line" onclick={editInsertHorizontalRule}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12" />
+                          </svg>
+                        </button>
+                      </div>
+
+                      <div class="toolbar-spacer"></div>
+
+                      <button
+                        type="button"
+                        class="preview-toggle"
+                        class:active={showEditPreview}
+                        onclick={() => showEditPreview = !showEditPreview}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                        {showEditPreview ? 'Edit' : 'Preview'}
+                      </button>
+                    </div>
+
+                    {#if showEditPreview}
+                      <div class="preview-pane">
+                        <div class="preview-content markdown-content">
+                          {@html renderMarkdown(editContent)}
+                        </div>
+                      </div>
+                    {:else}
+                      <textarea
+                        class="edit-content-input"
+                        bind:value={editContent}
+                        bind:this={editTextarea}
+                        placeholder="Post content... Supports Markdown formatting."
+                        rows="12"
+                      ></textarea>
+                    {/if}
+
                     {#if error}
                       <div class="error-message">{error}</div>
                     {/if}
@@ -689,6 +1031,75 @@
         <Button variant="primary" onclick={deletePost} disabled={deleting}>
           {deleting ? 'Deleting...' : 'Delete Post'}
         </Button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Post Reference Modal -->
+{#if showPostRefModal}
+  <div class="modal-overlay" onclick={closePostRefModal}>
+    <div class="post-ref-modal" onclick={(e) => e.stopPropagation()}>
+      <div class="post-ref-modal-header">
+        <h3>Reference Another Post</h3>
+        <p>Search for a post to link to</p>
+      </div>
+
+      <div class="post-ref-search-container">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input
+          type="text"
+          class="post-ref-search-input"
+          placeholder="Search posts by title..."
+          value={postRefSearch}
+          oninput={handlePostRefSearchInput}
+        />
+        {#if searchingPosts}
+          <div class="search-spinner"></div>
+        {/if}
+      </div>
+
+      <div class="post-ref-results">
+        {#if searchError}
+          <div class="search-error">
+            <p>Error searching: {searchError}</p>
+          </div>
+        {:else if postRefResults.length > 0}
+          {#each postRefResults as refPost}
+            {#if refPost.category}
+              <button class="post-ref-result" onclick={() => insertPostReference(refPost)}>
+                <span
+                  class="result-category"
+                  style="background: {refPost.category.color}20; color: {refPost.category.color}; border-color: {refPost.category.color}40;"
+                >
+                  {refPost.category.name}
+                </span>
+                <span class="result-title">{refPost.title}</span>
+              </button>
+            {/if}
+          {/each}
+        {:else if postRefSearch && !searchingPosts}
+          <div class="no-results">
+            <p>No posts found matching "{postRefSearch}"</p>
+          </div>
+        {:else if !postRefSearch}
+          <div class="search-hint">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+            </svg>
+            <p>Start typing to search for posts</p>
+          </div>
+        {/if}
+      </div>
+
+      <div class="post-ref-modal-footer">
+        <button type="button" class="post-ref-cancel" onclick={closePostRefModal}>Cancel</button>
       </div>
     </div>
   </div>
@@ -1135,6 +1546,62 @@
     margin: 1.5rem 0;
   }
 
+  /* Post Reference Card Styles */
+  .markdown-content :global(.post-reference) {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.875rem 1rem;
+    background: linear-gradient(180deg, rgba(42, 36, 28, 0.8) 0%, rgba(30, 26, 21, 0.8) 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 8px;
+    margin: 0.75rem 0;
+    text-decoration: none;
+    transition: all 0.15s;
+    cursor: pointer;
+  }
+
+  .markdown-content :global(.post-reference:hover) {
+    border-color: #d4a44c;
+    background: linear-gradient(180deg, rgba(50, 43, 33, 0.9) 0%, rgba(35, 30, 24, 0.9) 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  .markdown-content :global(.post-ref-category) {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  .markdown-content :global(.post-ref-title) {
+    flex: 1;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #f0e6d8;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .markdown-content :global(.post-ref-arrow) {
+    color: #d4a44c;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+  }
+
+  .markdown-content :global(.post-reference:hover .post-ref-arrow) {
+    transform: translateX(3px);
+  }
+
   .post-footer {
     display: flex;
     justify-content: space-between;
@@ -1465,5 +1932,275 @@
     .guide-header-meta {
       font-size: 0.75rem;
     }
+  }
+
+  /* Edit form toolbar additions */
+  .toolbar-group {
+    display: flex;
+    gap: 0.125rem;
+  }
+
+  .toolbar-divider {
+    width: 1px;
+    height: 24px;
+    background: #4a3f32;
+    margin: 0 0.375rem;
+  }
+
+  .toolbar-text {
+    font-size: 0.75rem;
+    font-weight: 700;
+    font-family: 'Cinzel', serif;
+  }
+
+  .toolbar-spacer {
+    flex: 1;
+  }
+
+  .preview-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.75rem;
+    background: transparent;
+    border: 1px solid #4a3f32;
+    border-radius: 4px;
+    color: #a89880;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .preview-toggle:hover {
+    background: rgba(212, 164, 76, 0.15);
+    border-color: #6b5a48;
+    color: #d4a44c;
+  }
+
+  .preview-toggle.active {
+    background: rgba(212, 164, 76, 0.2);
+    border-color: #d4a44c;
+    color: #d4a44c;
+  }
+
+  .preview-toggle svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .preview-pane {
+    min-height: 250px;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #4a3f32;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+  }
+
+  .preview-content {
+    color: #c4b8a4;
+    line-height: 1.7;
+  }
+
+  .edit-content-input {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+
+  @media (max-width: 640px) {
+    .toolbar-divider {
+      display: none;
+    }
+
+    .toolbar-spacer {
+      display: none;
+    }
+
+    .preview-toggle {
+      margin-left: 0.25rem;
+    }
+  }
+
+  /* Post Reference Modal */
+  .post-ref-modal {
+    background: linear-gradient(180deg, #2a241c 0%, #1e1a15 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 12px;
+    padding: 1.5rem;
+    max-width: 500px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  .post-ref-modal-header {
+    margin-bottom: 1.25rem;
+  }
+
+  .post-ref-modal-header h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #f5d898;
+    margin: 0 0 0.25rem 0;
+  }
+
+  .post-ref-modal-header p {
+    font-size: 0.85rem;
+    color: #8a7a6a;
+    margin: 0;
+  }
+
+  .post-ref-search-container {
+    position: relative;
+    margin-bottom: 1rem;
+  }
+
+  .post-ref-search-container .search-icon {
+    position: absolute;
+    left: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    color: #6b5a48;
+    pointer-events: none;
+  }
+
+  .post-ref-search-input {
+    width: 100%;
+    padding: 0.875rem 1rem 0.875rem 2.75rem;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    color: #f0e6d8;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #4a3f32;
+    border-radius: 8px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .post-ref-search-input:focus {
+    outline: none;
+    border-color: #d4a44c;
+    box-shadow: 0 0 0 3px rgba(212, 164, 76, 0.15);
+  }
+
+  .post-ref-search-input::placeholder {
+    color: #6b5a48;
+  }
+
+  .search-spinner {
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    border: 2px solid #4a3f32;
+    border-top-color: #d4a44c;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: translateY(-50%) rotate(360deg); }
+  }
+
+  .post-ref-results {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 200px;
+    max-height: 300px;
+    margin-bottom: 1rem;
+  }
+
+  .post-ref-result {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.875rem 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid #3d3428;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+  }
+
+  .post-ref-result:hover {
+    background: rgba(212, 164, 76, 0.1);
+    border-color: #d4a44c;
+  }
+
+  .result-category {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid;
+    border-radius: 3px;
+  }
+
+  .result-title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #f0e6d8;
+    line-height: 1.4;
+  }
+
+  .no-results, .search-hint, .search-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 2rem;
+    text-align: center;
+    color: #6b5a48;
+  }
+
+  .search-error {
+    color: #e8a0a0;
+    background: rgba(196, 107, 107, 0.1);
+    border-radius: 8px;
+  }
+
+  .search-hint svg {
+    width: 32px;
+    height: 32px;
+    opacity: 0.5;
+  }
+
+  .no-results p, .search-hint p {
+    margin: 0;
+    font-size: 0.9rem;
+  }
+
+  .post-ref-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .post-ref-cancel {
+    padding: 0.625rem 1.25rem;
+    background: transparent;
+    border: 1px solid #4a3f32;
+    border-radius: 6px;
+    color: #a89880;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .post-ref-cancel:hover {
+    background: rgba(0, 0, 0, 0.3);
+    border-color: #6b5a48;
+    color: #c4b8a4;
   }
 </style>

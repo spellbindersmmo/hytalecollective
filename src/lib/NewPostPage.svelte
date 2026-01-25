@@ -33,6 +33,12 @@
   let headerImageInput = $state(null)
   let uploadingHeaderImage = $state(false)
 
+  // Post reference modal
+  let showPostRefModal = $state(false)
+  let postRefSearch = $state('')
+  let postRefResults = $state([])
+  let searchingPosts = $state(false)
+
   // Check if selected category is guides
   const isGuidesCategory = $derived(() => {
     const category = allCategories.find(c => c.id === selectedCategory)
@@ -64,9 +70,99 @@
       .replace(/^&gt; (.+)$/gm, '<blockquote class="md-quote">$1</blockquote>')
       .replace(/^- (.+)$/gm, '<li class="md-bullet">$1</li>')
       .replace(/^\d+\. (.+)$/gm, '<li class="md-numbered">$1</li>')
+      // Post references - {{ref:slug|title|category|color}}
+      .replace(/\{\{ref:([^|]+)\|([^|]+)\|([^|]+)\|([^}]+)\}\}/g, (match, refSlug, title, category, color) => {
+        return `<a href="#" class="post-reference" data-post-ref="${refSlug}">
+          <span class="post-ref-category" style="background: ${color}20; color: ${color}; border-color: ${color}40;">${category}</span>
+          <span class="post-ref-title">${title}</span>
+          <span class="post-ref-arrow">→</span>
+        </a>`
+      })
       .replace(/\n/g, '<br />')
 
     return html
+  }
+
+  // Post reference search
+  let searchTimeout = null
+  let searchError = $state(null)
+
+  async function searchPosts(query) {
+    if (!query.trim()) {
+      postRefResults = []
+      searchError = null
+      return
+    }
+
+    searchingPosts = true
+    searchError = null
+
+    try {
+      const { data, error } = await supabase
+        .from('forum_posts')
+        .select(`
+          id, title, slug,
+          category:forum_categories(name, color)
+        `)
+        .ilike('title', `%${query}%`)
+        .limit(10)
+
+      if (error) {
+        console.error('Search error:', error)
+        searchError = error.message
+        postRefResults = []
+      } else {
+        postRefResults = data || []
+      }
+    } catch (e) {
+      console.error('Error searching posts:', e)
+      searchError = e.message
+      postRefResults = []
+    } finally {
+      searchingPosts = false
+    }
+  }
+
+  function handlePostRefSearchInput(e) {
+    const query = e.target.value
+    postRefSearch = query
+
+    // Debounce search
+    if (searchTimeout) clearTimeout(searchTimeout)
+    searchTimeout = setTimeout(() => searchPosts(query), 300)
+  }
+
+  function insertPostReference(post) {
+    if (!contentTextarea) return
+
+    const start = contentTextarea.selectionStart
+    // Format: {{ref:slug|title|category|color}}
+    const refText = `{{ref:${post.slug}|${post.title}|${post.category.name}|${post.category.color}}}`
+
+    content = content.substring(0, start) + refText + content.substring(start)
+
+    // Close modal and reset
+    showPostRefModal = false
+    postRefSearch = ''
+    postRefResults = []
+
+    setTimeout(() => {
+      contentTextarea.focus()
+      const newPosition = start + refText.length
+      contentTextarea.setSelectionRange(newPosition, newPosition)
+    }, 0)
+  }
+
+  function openPostRefModal() {
+    showPostRefModal = true
+    postRefSearch = ''
+    postRefResults = []
+  }
+
+  function closePostRefModal() {
+    showPostRefModal = false
+    postRefSearch = ''
+    postRefResults = []
   }
 
   // Formatting functions
@@ -354,6 +450,21 @@
         selectedCategory = cat.id
       }
     }
+
+    // Handle clicks on post references in preview using event delegation
+    function handlePostRefClick(e) {
+      const refLink = e.target.closest('[data-post-ref]')
+      if (refLink) {
+        e.preventDefault()
+        const refSlug = refLink.getAttribute('data-post-ref')
+        if (refSlug) {
+          onnavigate(`forum-post-${refSlug}`)
+        }
+      }
+    }
+
+    document.addEventListener('click', handlePostRefClick)
+    return () => document.removeEventListener('click', handlePostRefClick)
   })
 
   async function loadCategories() {
@@ -627,6 +738,15 @@
                       <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
                     </svg>
                   </button>
+                  <button type="button" class="toolbar-btn" title="Reference Another Post" onclick={openPostRefModal}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                      <line x1="16" y1="13" x2="8" y2="13" />
+                      <line x1="16" y1="17" x2="8" y2="17" />
+                      <polyline points="10 9 9 9 8 9" />
+                    </svg>
+                  </button>
                   <div class="image-menu-container">
                     <button
                       type="button"
@@ -783,6 +903,75 @@
         </button>
       </div>
       <button type="button" class="size-cancel" onclick={cancelImageUpload}>Cancel</button>
+    </div>
+  </div>
+{/if}
+
+{#if showPostRefModal}
+  <div class="modal-overlay" onclick={closePostRefModal}>
+    <div class="post-ref-modal" onclick={(e) => e.stopPropagation()}>
+      <div class="post-ref-modal-header">
+        <h3>Reference Another Post</h3>
+        <p>Search for a post to link to</p>
+      </div>
+
+      <div class="post-ref-search-container">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input
+          type="text"
+          class="post-ref-search-input"
+          placeholder="Search posts by title..."
+          value={postRefSearch}
+          oninput={handlePostRefSearchInput}
+          autofocus
+        />
+        {#if searchingPosts}
+          <div class="search-spinner"></div>
+        {/if}
+      </div>
+
+      <div class="post-ref-results">
+        {#if searchError}
+          <div class="search-error">
+            <p>Error searching: {searchError}</p>
+          </div>
+        {:else if postRefResults.length > 0}
+          {#each postRefResults as post}
+            {#if post.category}
+              <button class="post-ref-result" onclick={() => insertPostReference(post)}>
+                <span
+                  class="result-category"
+                  style="background: {post.category.color}20; color: {post.category.color}; border-color: {post.category.color}40;"
+                >
+                  {post.category.name}
+                </span>
+                <span class="result-title">{post.title}</span>
+              </button>
+            {/if}
+          {/each}
+        {:else if postRefSearch && !searchingPosts}
+          <div class="no-results">
+            <p>No posts found matching "{postRefSearch}"</p>
+          </div>
+        {:else if !postRefSearch}
+          <div class="search-hint">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+            </svg>
+            <p>Start typing to search for posts</p>
+          </div>
+        {/if}
+      </div>
+
+      <div class="post-ref-modal-footer">
+        <button type="button" class="post-ref-cancel" onclick={closePostRefModal}>Cancel</button>
+      </div>
     </div>
   </div>
 {/if}
@@ -1573,5 +1762,240 @@
     .size-options {
       grid-template-columns: repeat(2, 1fr);
     }
+  }
+
+  /* Post Reference Modal */
+  .post-ref-modal {
+    background: linear-gradient(180deg, #2a241c 0%, #1e1a15 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 12px;
+    padding: 1.5rem;
+    max-width: 500px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  .post-ref-modal-header {
+    margin-bottom: 1.25rem;
+  }
+
+  .post-ref-modal-header h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #f5d898;
+    margin: 0 0 0.25rem 0;
+  }
+
+  .post-ref-modal-header p {
+    font-size: 0.85rem;
+    color: #8a7a6a;
+    margin: 0;
+  }
+
+  .post-ref-search-container {
+    position: relative;
+    margin-bottom: 1rem;
+  }
+
+  .post-ref-search-container .search-icon {
+    position: absolute;
+    left: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    color: #6b5a48;
+    pointer-events: none;
+  }
+
+  .post-ref-search-input {
+    width: 100%;
+    padding: 0.875rem 1rem 0.875rem 2.75rem;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    color: #f0e6d8;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #4a3f32;
+    border-radius: 8px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .post-ref-search-input:focus {
+    outline: none;
+    border-color: #d4a44c;
+    box-shadow: 0 0 0 3px rgba(212, 164, 76, 0.15);
+  }
+
+  .post-ref-search-input::placeholder {
+    color: #6b5a48;
+  }
+
+  .search-spinner {
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    border: 2px solid #4a3f32;
+    border-top-color: #d4a44c;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .post-ref-results {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 200px;
+    max-height: 300px;
+    margin-bottom: 1rem;
+  }
+
+  .post-ref-result {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.875rem 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid #3d3428;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+  }
+
+  .post-ref-result:hover {
+    background: rgba(212, 164, 76, 0.1);
+    border-color: #d4a44c;
+  }
+
+  .result-category {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid;
+    border-radius: 3px;
+  }
+
+  .result-title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #f0e6d8;
+    line-height: 1.4;
+  }
+
+  .no-results, .search-hint, .search-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 2rem;
+    text-align: center;
+    color: #6b5a48;
+  }
+
+  .search-error {
+    color: #e8a0a0;
+    background: rgba(196, 107, 107, 0.1);
+    border-radius: 8px;
+  }
+
+  .search-hint svg {
+    width: 32px;
+    height: 32px;
+    opacity: 0.5;
+  }
+
+  .no-results p, .search-hint p {
+    margin: 0;
+    font-size: 0.9rem;
+  }
+
+  .post-ref-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .post-ref-cancel {
+    padding: 0.625rem 1.25rem;
+    background: transparent;
+    border: 1px solid #4a3f32;
+    border-radius: 6px;
+    color: #a89880;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .post-ref-cancel:hover {
+    background: rgba(0, 0, 0, 0.3);
+    border-color: #6b5a48;
+    color: #c4b8a4;
+  }
+
+  /* Post Reference Card Styles (for preview and rendered content) */
+  .markdown-content :global(.post-reference) {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.875rem 1rem;
+    background: linear-gradient(180deg, rgba(42, 36, 28, 0.8) 0%, rgba(30, 26, 21, 0.8) 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 8px;
+    margin: 0.75rem 0;
+    text-decoration: none;
+    transition: all 0.15s;
+    cursor: pointer;
+  }
+
+  .markdown-content :global(.post-reference:hover) {
+    border-color: #d4a44c;
+    background: linear-gradient(180deg, rgba(50, 43, 33, 0.9) 0%, rgba(35, 30, 24, 0.9) 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  .markdown-content :global(.post-ref-category) {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  .markdown-content :global(.post-ref-title) {
+    flex: 1;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #f0e6d8;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .markdown-content :global(.post-ref-arrow) {
+    color: #d4a44c;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+  }
+
+  .markdown-content :global(.post-reference:hover .post-ref-arrow) {
+    transform: translateX(3px);
   }
 </style>
