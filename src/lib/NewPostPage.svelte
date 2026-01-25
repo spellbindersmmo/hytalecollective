@@ -64,8 +64,8 @@
       .replace(/\+\+(.+?)\+\+/g, '<u>$1</u>')
       .replace(/^---$/gm, '<hr class="md-divider" />')
       .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
-      .replace(/!\[([^\]]*)\]\(([^)#]+)#(small|medium|large)\)/g, '<img src="$2" alt="$1" class="md-image md-image-$3" />')
-      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-image" />')
+      .replace(/!\[([^\]]*)\]\(([^)#]+)#(small|medium|large)\)/g, '<img src="$2" alt="$1" class="md-image md-image-$3" loading="lazy" decoding="async" />')
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-image" loading="lazy" decoding="async" />')
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
       .replace(/^&gt; (.+)$/gm, '<blockquote class="md-quote">$1</blockquote>')
       .replace(/^- (.+)$/gm, '<li class="md-bullet">$1</li>')
@@ -1558,6 +1558,9 @@
     border-radius: 6px;
     margin: 0.5rem 0;
     border: 1px solid #3d3428;
+    /* Performance: Isolate image rendering */
+    contain: layout style paint;
+    content-visibility: auto;
   }
 
   .markdown-content :global(.md-image-small) {

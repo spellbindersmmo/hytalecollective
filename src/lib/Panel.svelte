@@ -15,6 +15,8 @@
 <style>
   .panel {
     position: relative;
+    /* Performance: Isolate panel rendering to prevent repaints */
+    contain: layout style paint;
   }
 
   .panel-frame {
