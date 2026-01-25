@@ -45,6 +45,89 @@
     return null
   }
 
+  // Convert internal page state to URL path
+  function pageToUrl(page) {
+    if (page === 'home') return '/'
+    if (page === 'forum') return '/forum'
+    if (page === 'forum-new-post') return '/forum/new'
+    if (page.startsWith('forum-new-post-')) return `/forum/new/${page.slice(15)}`
+    if (page.startsWith('forum-category-')) return `/forum/category/${page.slice(15)}`
+    if (page.startsWith('forum-post-')) return `/forum/post/${page.slice(11)}`
+    if (page === 'mods') return '/mods'
+    if (page.startsWith('mod-')) return `/mods/${page.slice(4)}`
+    if (page === 'builds') return '/builds'
+    if (page.startsWith('build-')) return `/builds/${page.slice(6)}`
+    if (page === 'servers') return '/servers'
+    if (page === 'servers-add') return '/servers/add'
+    if (page.startsWith('server-')) return `/servers/${page.slice(7)}`
+    if (page.startsWith('profile-')) return `/profile/${page.slice(8)}`
+    if (page === 'settings') return '/settings'
+    if (page === 'admin') return '/admin'
+    if (page === 'report') return '/report'
+    if (page === 'upload') return '/upload'
+    return '/'
+  }
+
+  // Convert URL path to internal page state
+  function urlToPage(pathname) {
+    if (pathname === '/' || pathname === '') return 'home'
+
+    // Remove leading slash and split
+    const parts = pathname.replace(/^\//, '').split('/')
+
+    if (parts[0] === 'forum') {
+      if (parts.length === 1) return 'forum'
+      if (parts[1] === 'new') return parts[2] ? `forum-new-post-${parts[2]}` : 'forum-new-post'
+      if (parts[1] === 'category' && parts[2]) return `forum-category-${parts[2]}`
+      if (parts[1] === 'post' && parts[2]) return `forum-post-${parts[2]}`
+      return 'forum'
+    }
+    if (parts[0] === 'mods') {
+      return parts[1] ? `mod-${parts[1]}` : 'mods'
+    }
+    if (parts[0] === 'builds') {
+      return parts[1] ? `build-${parts[1]}` : 'builds'
+    }
+    if (parts[0] === 'servers') {
+      if (parts[1] === 'add') return 'servers-add'
+      return parts[1] ? `server-${parts[1]}` : 'servers'
+    }
+    if (parts[0] === 'profile' && parts[1]) {
+      return `profile-${parts[1]}`
+    }
+    if (parts[0] === 'settings') return 'settings'
+    if (parts[0] === 'admin') return 'admin'
+    if (parts[0] === 'report') return 'report'
+    if (parts[0] === 'upload') return 'upload'
+
+    return 'home'
+  }
+
+  // Route protection - define which pages require authentication or admin
+  function getRouteProtection(page) {
+    // Admin only
+    if (page === 'admin') return 'admin'
+
+    // Requires authentication
+    if (page === 'settings') return 'auth'
+    if (page === 'upload') return 'auth'
+    if (page === 'report') return 'auth'
+    if (page === 'servers-add') return 'auth'
+    if (page === 'forum-new-post' || page.startsWith('forum-new-post-')) return 'auth'
+
+    // Public
+    return 'public'
+  }
+
+  // Check if user can access a page
+  function canAccessPage(page) {
+    const protection = getRouteProtection(page)
+    if (protection === 'public') return true
+    if (protection === 'auth') return auth.isAuthenticated
+    if (protection === 'admin') return auth.isAdmin
+    return false
+  }
+
   // Derived route info
   let forumCategorySlug = $derived(getRouteParam(currentPage, 'forum-category-'))
   let forumPostSlug = $derived(getRouteParam(currentPage, 'forum-post-'))
@@ -63,15 +146,62 @@
   let error = $state(null)
   let connectionFailed = $state(false)
 
-  function navigate(page) {
+  function navigate(page, replaceState = false) {
+    // Check route protection
+    if (!canAccessPage(page)) {
+      // Redirect to home if not authorized
+      page = 'home'
+    }
+
     currentPage = page
     window.scrollTo(0, 0)
+
+    // Update browser URL
+    const url = pageToUrl(page)
+    if (replaceState) {
+      window.history.replaceState({ page }, '', url)
+    } else {
+      window.history.pushState({ page }, '', url)
+    }
   }
 
   // Expose navigate globally for components
   if (typeof window !== 'undefined') {
     window.navigate = navigate
+
+    // Handle browser back/forward buttons
+    window.addEventListener('popstate', (event) => {
+      let page
+      if (event.state && event.state.page) {
+        page = event.state.page
+      } else {
+        // Fallback: parse URL if no state
+        page = urlToPage(window.location.pathname)
+      }
+
+      // Check route protection
+      if (!canAccessPage(page)) {
+        // Replace history with home page
+        window.history.replaceState({ page: 'home' }, '', '/')
+        page = 'home'
+      }
+
+      currentPage = page
+      window.scrollTo(0, 0)
+    })
   }
+
+  // Watch for auth state changes and redirect if on protected page
+  $effect(() => {
+    // This runs whenever auth state changes
+    const isAuth = auth.isAuthenticated
+    const isAdmin = auth.isAdmin
+
+    // Check if current page is still accessible
+    if (!canAccessPage(currentPage)) {
+      navigate('home', true)
+    }
+  })
 
   // Fetch with retry logic and connection recovery - returns { data, failed } to track failures
   async function fetchWithRetry(name, fetchFn, fallback, retries = 2, timeout = 20000) {
@@ -156,6 +286,25 @@
   }
 
   onMount(() => {
+    // Parse initial URL and set page state
+    let initialPage = urlToPage(window.location.pathname)
+
+    // Check if auth is already loaded (from stored session) and page is protected
+    // The $effect will also handle this once auth loads, but this catches immediate cases
+    const protection = getRouteProtection(initialPage)
+    if (protection !== 'public' && !auth.loading) {
+      if (!canAccessPage(initialPage)) {
+        initialPage = 'home'
+      }
+    }
+
+    if (initialPage !== 'home') {
+      currentPage = initialPage
+    }
+
+    // Replace current history state with page info
+    window.history.replaceState({ page: currentPage }, '', pageToUrl(currentPage))
+
     initializeApp()
   })
 </script>
