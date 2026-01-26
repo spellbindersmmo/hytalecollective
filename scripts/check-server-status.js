@@ -15,13 +15,59 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+async function expireManualStatuses() {
+  console.log('Checking for expired manual statuses...\n');
+
+  // Find servers where status_expires_at has passed
+  const { data: expiredServers, error } = await supabase
+    .from('servers')
+    .select('id, name')
+    .lt('status_expires_at', new Date().toISOString())
+    .not('status_expires_at', 'is', null);
+
+  if (error) {
+    console.error('Error checking expired statuses:', error);
+    return;
+  }
+
+  if (!expiredServers || expiredServers.length === 0) {
+    console.log('No expired statuses to reset');
+    return;
+  }
+
+  console.log(`Found ${expiredServers.length} servers with expired status:`);
+
+  for (const server of expiredServers) {
+    console.log(`  - Resetting: ${server.name}`);
+
+    // Reset to pending status and clear expiration
+    const { error: updateError } = await supabase
+      .from('servers')
+      .update({
+        status: 'pending',
+        status_expires_at: null,
+        manual_status: null
+      })
+      .eq('id', server.id);
+
+    if (updateError) {
+      console.log(`    Error: ${updateError.message}`);
+    }
+  }
+
+  console.log('');
+}
+
 async function checkAllServers() {
+  // First, handle expired manual statuses
+  await expireManualStatuses();
+
   console.log('Fetching community servers to check...\n');
 
   // Get all community-submitted servers
   const { data: servers, error } = await supabase
     .from('servers')
-    .select('id, name, ip_address, port, status, current_players, max_players')
+    .select('id, name, ip_address, port, status, current_players, max_players, status_expires_at')
     .eq('source', 'community');
 
   if (error) {
@@ -47,6 +93,15 @@ async function checkAllServers() {
   for (const server of servers) {
     const port = server.port || 25565;
     console.log(`\nQuerying: ${server.name} (${server.ip_address}:${port})`);
+
+    // Skip auto-check if server has a valid manual status that hasn't expired
+    if (server.status_expires_at) {
+      const expiresAt = new Date(server.status_expires_at);
+      if (expiresAt > new Date()) {
+        console.log(`  Skipping: Manual status active until ${expiresAt.toLocaleString()}`);
+        continue;
+      }
+    }
 
     const result = await queryServer(server.ip_address, port);
 
@@ -80,8 +135,19 @@ async function checkAllServers() {
     }
 
     // Build update object
+    // If server was 'pending' (never verified) and still can't be reached, keep it pending
+    // Only mark as 'offline' if it was previously 'online' (i.e., it went down)
+    let newStatus;
+    if (result.online) {
+      newStatus = 'online';
+    } else if (server.status === 'pending') {
+      newStatus = 'pending'; // Keep unverified servers as pending, not offline
+    } else {
+      newStatus = 'offline';
+    }
+
     const update = {
-      status: result.online ? 'online' : 'offline',
+      status: newStatus,
       last_ping_at: new Date().toISOString()
     };
 

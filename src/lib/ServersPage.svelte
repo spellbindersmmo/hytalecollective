@@ -233,6 +233,7 @@
                 <option value="all">All</option>
                 <option value="online">Online</option>
                 <option value="offline">Offline</option>
+                <option value="pending">Unverified</option>
               </select>
             </div>
 
@@ -331,7 +332,7 @@
               players={server.current_players}
               maxPlayers={server.max_players}
               tags={server.tags}
-              online={server.status === 'online'}
+              status={server.status}
               icon={server.icon}
               banner={server.banner}
               source={server.source}

@@ -4,6 +4,7 @@
   import Panel from './Panel.svelte'
   import Button from './Button.svelte'
   import { auth } from './stores/auth.svelte.js'
+  import { supabase } from './supabase.js'
   import { fetchServerBySlug, voteForServer, checkUserVote } from './stores/data.svelte.js'
 
   let { serverSlug = '', onnavigate = () => {} } = $props()
@@ -16,6 +17,17 @@
   let voting = $state(false)
   let voteError = $state(null)
   let copied = $state(false)
+
+  // Owner panel state
+  let showOwnerPanel = $state(false)
+  let verifyingWebsite = $state(false)
+  let verificationMessage = $state(null)
+  let copiedVerification = $state(false)
+
+  // Check if current user is the server owner
+  const isOwner = $derived(
+    auth.isAuthenticated && server && server.owner_id === auth.user?.id
+  )
 
   // Source badge configuration
   const sourceConfig = {
@@ -92,6 +104,70 @@
       ? (server.port !== 25565 ? `${server.ip_address}:${server.port}` : server.ip_address)
       : ''
   )
+
+  // Verify website ownership
+  async function verifyWebsite() {
+    if (!isOwner || !server.website || verifyingWebsite) return
+
+    verifyingWebsite = true
+    verificationMessage = null
+
+    try {
+      // Try to fetch the verification file from their website
+      const verifyUrl = new URL('/.well-known/hytale-collective.txt', server.website).href
+
+      const response = await fetch(verifyUrl, {
+        mode: 'cors',
+        cache: 'no-store'
+      })
+
+      if (!response.ok) {
+        throw new Error('Could not find verification file. Make sure the file exists at ' + verifyUrl)
+      }
+
+      const content = await response.text()
+      const expectedCode = server.verification_code
+
+      if (content.trim().includes(expectedCode)) {
+        // Verification successful!
+        const { error: updateError } = await supabase
+          .from('servers')
+          .update({
+            website_verified: true,
+            website_verified_at: new Date().toISOString()
+          })
+          .eq('id', server.id)
+
+        if (updateError) throw updateError
+
+        server.website_verified = true
+        server.website_verified_at = new Date().toISOString()
+
+        verificationMessage = { type: 'success', text: 'Website verified successfully!' }
+      } else {
+        throw new Error('Verification code not found in file. Make sure the file contains: ' + expectedCode)
+      }
+    } catch (e) {
+      if (e.message.includes('Failed to fetch') || e.message.includes('CORS')) {
+        verificationMessage = {
+          type: 'error',
+          text: 'Could not access your website. Make sure the file is publicly accessible and CORS is enabled, or the file exists at the correct location.'
+        }
+      } else {
+        verificationMessage = { type: 'error', text: e.message }
+      }
+    } finally {
+      verifyingWebsite = false
+    }
+  }
+
+  // Copy verification code
+  function copyVerificationCode() {
+    if (!server?.verification_code) return
+    navigator.clipboard.writeText(server.verification_code)
+    copiedVerification = true
+    setTimeout(() => copiedVerification = false, 2000)
+  }
 </script>
 
 <div class="page">
@@ -163,13 +239,17 @@
                       </div>
                     </div>
 
-                    <div class="server-status" class:online={server.status === 'online'}>
+                    <div class="server-status" class:online={server.status === 'online'} class:pending={server.status === 'pending'}>
                       <span class="status-dot"></span>
                       <span class="status-text">
-                        {server.status === 'online' ? 'Online' : 'Offline'}
+                        {server.status === 'online' ? 'Online' : server.status === 'pending' ? 'N/A' : 'Offline'}
                       </span>
                       <span class="player-count">
-                        {server.current_players}/{server.max_players} players
+                        {#if server.status === 'pending'}
+                          No query plugin detected
+                        {:else}
+                          {server.current_players}/{server.max_players} players
+                        {/if}
                       </span>
                     </div>
                   </div>
@@ -325,6 +405,143 @@
                 </div>
               </div>
             </Panel>
+
+            <!-- Owner Verification Panel -->
+            {#if isOwner}
+              <Panel>
+                <div class="owner-panel">
+                  <button
+                    class="owner-panel-header"
+                    onclick={() => showOwnerPanel = !showOwnerPanel}
+                  >
+                    <h3 class="section-label">Server Management</h3>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      class="chevron"
+                      class:expanded={showOwnerPanel}
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+
+                  {#if showOwnerPanel}
+                    <div class="owner-panel-content">
+                      {#if verificationMessage}
+                        <div class="verification-message" class:success={verificationMessage.type === 'success'} class:error={verificationMessage.type === 'error'}>
+                          {verificationMessage.text}
+                        </div>
+                      {/if}
+
+                      <!-- Server Status Info -->
+                      <div class="verification-section">
+                        {#if server.status === 'pending'}
+                          <h4>Enable Status & Player Count</h4>
+                          <p class="hint">Your server shows as "N/A" because we can't detect its status. Install the HyQuery plugin to display player count and online status.</p>
+
+                          <div class="setup-steps">
+                            <div class="setup-step">
+                              <span class="step-number">1</span>
+                              <div class="step-content">
+                                <p><strong>Download the plugin</strong></p>
+                                <a href="/downloads/hyquery.jar" download class="plugin-download-btn">
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                  </svg>
+                                  Download HyQuery.jar
+                                </a>
+                              </div>
+                            </div>
+
+                            <div class="setup-step">
+                              <span class="step-number">2</span>
+                              <div class="step-content">
+                                <p><strong>Install on your server</strong></p>
+                                <p class="step-desc">Place <code>hyquery.jar</code> in your server's <code>plugins</code> folder.</p>
+                              </div>
+                            </div>
+
+                            <div class="setup-step">
+                              <span class="step-number">3</span>
+                              <div class="step-content">
+                                <p><strong>Restart your server</strong></p>
+                                <p class="step-desc">The plugin starts automatically. We'll detect your server within a few minutes.</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <p class="setup-note">The plugin uses UDP on your game port - no additional ports needed.</p>
+                        {:else}
+                          <h4>Server Status</h4>
+                          <div class="status-info" class:online={server.status === 'online'}>
+                            <span class="status-indicator-large"></span>
+                            <div class="status-details">
+                              <span class="status-label">{server.status === 'online' ? 'Online' : 'Offline'}</span>
+                              <span class="status-hint">Status detected via query plugin</span>
+                            </div>
+                          </div>
+
+                          <details class="plugin-details">
+                            <summary>Need to reinstall the query plugin?</summary>
+                            <div class="plugin-details-content">
+                              <a href="/downloads/hyquery.jar" download class="plugin-download-btn-small">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                  <polyline points="7 10 12 15 17 10" />
+                                  <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                                Download HyQuery.jar
+                              </a>
+                              <p>Place in your server's <code>plugins</code> folder and restart.</p>
+                            </div>
+                          </details>
+                        {/if}
+                      </div>
+
+                      <!-- Website Verification -->
+                      {#if server.website}
+                        <div class="verification-section">
+                          <h4>
+                            Website Verification
+                            {#if server.website_verified}
+                              <span class="verified-badge">Verified</span>
+                            {/if}
+                          </h4>
+
+                          {#if !server.website_verified}
+                            <p class="hint">Verify you own this website by placing a file at:</p>
+                            <code class="file-path">{server.website}/.well-known/hytale-collective.txt</code>
+
+                            <p class="hint">The file should contain:</p>
+                            <div class="code-block">
+                              <code>{server.verification_code}</code>
+                              <button class="copy-small" onclick={copyVerificationCode}>
+                                {copiedVerification ? 'Copied!' : 'Copy'}
+                              </button>
+                            </div>
+
+                            <Button
+                              variant="secondary"
+                              onclick={verifyWebsite}
+                              disabled={verifyingWebsite}
+                              fullWidth
+                            >
+                              {verifyingWebsite ? 'Verifying...' : 'Verify Website'}
+                            </Button>
+                          {:else}
+                            <p class="success-text">Your website has been verified!</p>
+                          {/if}
+                        </div>
+                      {/if}
+                    </div>
+                  {/if}
+                </div>
+              </Panel>
+            {/if}
           </aside>
         </div>
       {/if}
@@ -525,6 +742,14 @@
 
   .server-status.online .status-text {
     color: #7ec47b;
+  }
+
+  .server-status.pending .status-dot {
+    background: #d4a44c;
+  }
+
+  .server-status.pending .status-text {
+    color: #d4a44c;
   }
 
   .player-count {
@@ -831,5 +1056,396 @@
   .error-state p {
     color: #8a7a6a;
     margin: 0 0 1.5rem 0;
+  }
+
+  /* Owner Panel */
+  .owner-panel {
+    padding: 0.5rem;
+  }
+
+  .owner-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+  }
+
+  .owner-panel-header .section-label {
+    margin: 0;
+  }
+
+  .owner-panel-header .chevron {
+    width: 20px;
+    height: 20px;
+    color: #8a7a6a;
+    transition: transform 0.2s;
+  }
+
+  .owner-panel-header .chevron.expanded {
+    transform: rotate(180deg);
+  }
+
+  .owner-panel-content {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .verification-section {
+    padding-top: 1rem;
+    border-top: 1px solid #3d3428;
+  }
+
+  .verification-section:first-child {
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .verification-section h4 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #c4b8a4;
+    margin: 0 0 0.5rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .plugin-download-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: linear-gradient(180deg, rgba(107, 184, 204, 0.2) 0%, rgba(107, 184, 204, 0.1) 100%);
+    border: 1px solid rgba(107, 184, 204, 0.4);
+    border-radius: 4px;
+    color: #6bb8cc;
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+
+  .plugin-download-btn:hover {
+    background: linear-gradient(180deg, rgba(107, 184, 204, 0.3) 0%, rgba(107, 184, 204, 0.15) 100%);
+    border-color: rgba(107, 184, 204, 0.6);
+  }
+
+  .plugin-download-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .setup-steps {
+    margin: 0.75rem 0;
+  }
+
+  .setup-step {
+    display: flex;
+    gap: 0.6rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .setup-step:last-child {
+    margin-bottom: 0;
+  }
+
+  .step-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: rgba(107, 184, 204, 0.2);
+    border: 1px solid rgba(107, 184, 204, 0.4);
+    border-radius: 50%;
+    color: #6bb8cc;
+    font-size: 0.7rem;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .step-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .step-content p {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #c4b8a4;
+  }
+
+  .step-content .step-desc {
+    margin-top: 0.2rem;
+    font-size: 0.75rem;
+    color: #8a7a6a;
+  }
+
+  .step-content code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    color: #6bb8cc;
+  }
+
+  .step-content .plugin-download-btn {
+    margin-top: 0.4rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+  }
+
+  .setup-note {
+    margin: 0.75rem 0 0 0;
+    padding: 0.5rem 0.6rem;
+    background: rgba(126, 196, 123, 0.1);
+    border: 1px solid rgba(126, 196, 123, 0.2);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: #7ec47b;
+  }
+
+  .status-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: rgba(196, 107, 107, 0.1);
+    border: 1px solid rgba(196, 107, 107, 0.2);
+    border-radius: 6px;
+    margin-bottom: 0.75rem;
+  }
+
+  .status-info.online {
+    background: rgba(126, 196, 123, 0.1);
+    border-color: rgba(126, 196, 123, 0.2);
+  }
+
+  .status-indicator-large {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #c46b6b;
+    box-shadow: 0 0 8px rgba(196, 107, 107, 0.5);
+  }
+
+  .status-info.online .status-indicator-large {
+    background: #7ec47b;
+    box-shadow: 0 0 8px rgba(126, 196, 123, 0.5);
+  }
+
+  .status-details {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .status-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #c46b6b;
+  }
+
+  .status-info.online .status-label {
+    color: #7ec47b;
+  }
+
+  .status-hint {
+    font-size: 0.75rem;
+    color: #8a7a6a;
+  }
+
+  .plugin-details {
+    margin-top: 0.5rem;
+  }
+
+  .plugin-details summary {
+    font-size: 0.8rem;
+    color: #8a7a6a;
+    cursor: pointer;
+  }
+
+  .plugin-details summary:hover {
+    color: #a89880;
+  }
+
+  .plugin-details-content {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+  }
+
+  .plugin-details-content p {
+    margin: 0.5rem 0 0 0;
+    font-size: 0.75rem;
+    color: #8a7a6a;
+  }
+
+  .plugin-details-content code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    color: #6bb8cc;
+  }
+
+  .plugin-download-btn-small {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.75rem;
+    background: linear-gradient(180deg, rgba(107, 184, 204, 0.15) 0%, rgba(107, 184, 204, 0.08) 100%);
+    border: 1px solid rgba(107, 184, 204, 0.3);
+    border-radius: 4px;
+    color: #6bb8cc;
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+
+  .plugin-download-btn-small:hover {
+    background: linear-gradient(180deg, rgba(107, 184, 204, 0.25) 0%, rgba(107, 184, 204, 0.12) 100%);
+    border-color: rgba(107, 184, 204, 0.5);
+  }
+
+  .plugin-download-btn-small svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .verification-section .hint {
+    font-size: 0.8rem;
+    color: #8a7a6a;
+    margin: 0 0 0.75rem 0;
+    line-height: 1.4;
+  }
+
+  .verification-section .form-group {
+    margin-bottom: 0.75rem;
+  }
+
+  .verification-section .form-group label {
+    display: block;
+    font-size: 0.75rem;
+    color: #8a7a6a;
+    margin-bottom: 0.25rem;
+  }
+
+  .verification-section .form-group input,
+  .verification-section .form-group select {
+    width: 100%;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #3d3428;
+    border-radius: 4px;
+    color: #f0e6d8;
+    font-size: 0.85rem;
+  }
+
+  .verification-section .form-group input:focus,
+  .verification-section .form-group select:focus {
+    outline: none;
+    border-color: #d4a44c;
+  }
+
+  .verification-section .form-row {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .verification-section .form-row .form-group {
+    flex: 1;
+  }
+
+  .verified-badge {
+    font-size: 0.65rem;
+    padding: 0.15rem 0.4rem;
+    background: rgba(126, 196, 123, 0.2);
+    border: 1px solid rgba(126, 196, 123, 0.4);
+    border-radius: 3px;
+    color: #7ec47b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .file-path {
+    display: block;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #3d3428;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    color: #6bb8cc;
+    word-break: break-all;
+    margin-bottom: 0.75rem;
+  }
+
+  .code-block {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid #3d3428;
+    border-radius: 4px;
+    margin-bottom: 0.75rem;
+  }
+
+  .code-block code {
+    flex: 1;
+    font-size: 0.75rem;
+    color: #d4a44c;
+    word-break: break-all;
+  }
+
+  .copy-small {
+    padding: 0.25rem 0.5rem;
+    background: rgba(212, 164, 76, 0.15);
+    border: 1px solid rgba(212, 164, 76, 0.3);
+    border-radius: 3px;
+    color: #d4a44c;
+    font-size: 0.7rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+
+  .copy-small:hover {
+    background: rgba(212, 164, 76, 0.25);
+    border-color: rgba(212, 164, 76, 0.5);
+  }
+
+  .success-text {
+    font-size: 0.85rem;
+    color: #7ec47b;
+    margin: 0;
+  }
+
+  .verification-message {
+    padding: 0.75rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+  }
+
+  .verification-message.success {
+    background: rgba(126, 196, 123, 0.15);
+    border: 1px solid rgba(126, 196, 123, 0.3);
+    color: #7ec47b;
+  }
+
+  .verification-message.error {
+    background: rgba(196, 107, 107, 0.15);
+    border: 1px solid rgba(196, 107, 107, 0.3);
+    color: #e8a8a8;
   }
 </style>
