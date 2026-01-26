@@ -703,8 +703,12 @@ export async function fetchUserFavorites() {
   const modSlugs = favorites.filter(f => f.content_type === 'mod').map(f => f.content_id)
   const serverIds = favorites.filter(f => f.content_type === 'server').map(f => f.content_id)
 
+  // Separate local mods from Modtale mods
+  const localModSlugs = modSlugs.filter(s => s.startsWith('local-')).map(s => s.slice(6))
+  const modtaleSlugs = modSlugs.filter(s => !s.startsWith('local-'))
+
   // Fetch the actual content
-  const [builds, servers] = await Promise.all([
+  const [builds, servers, localMods] = await Promise.all([
     buildIds.length > 0 ? supabase
       .from('builds')
       .select('id, title, slug, thumbnail_path, author:profiles(username)')
@@ -722,30 +726,43 @@ export async function fetchUserFavorites() {
         ...s,
         icon: resolveImageUrl('servers', s.icon_url)
       })) || [])
+    : [],
+    localModSlugs.length > 0 ? supabase
+      .from('mods')
+      .select('id, title, slug, icon_path, author:profiles(username)')
+      .in('slug', localModSlugs)
+      .then(({ data }) => data?.map(m => ({
+        slug: `local-${m.slug}`,
+        title: m.title,
+        thumbnail: getStorageUrl('mod-images', m.icon_path),
+        author: m.author?.username || 'Unknown',
+        source: 'local'
+      })) || [])
     : []
   ])
 
   // Fetch mods from Modtale API (external)
-  let mods = []
-  if (modSlugs.length > 0) {
-    const modPromises = modSlugs.map(async (slug) => {
+  let modtaleMods = []
+  if (modtaleSlugs.length > 0) {
+    const modPromises = modtaleSlugs.map(async (slug) => {
       try {
         const mod = await getModtaleProject(slug)
         return {
           slug: mod.slug,
           title: mod.title,
-          thumbnail: mod.thumbnail_url,
-          author: mod.owner?.username || 'Unknown'
+          thumbnail: mod.thumbnail_url || mod.iconUrl,
+          author: mod.author || mod.owner?.username || 'Unknown',
+          source: 'modtale'
         }
       } catch (e) {
         console.error(`Error fetching mod ${slug}:`, e)
         return null
       }
     })
-    mods = (await Promise.all(modPromises)).filter(Boolean)
+    modtaleMods = (await Promise.all(modPromises)).filter(Boolean)
   }
 
-  return { builds, mods, servers }
+  return { builds, mods: [...localMods, ...modtaleMods], servers }
 }
 
 // ============================================
@@ -842,4 +859,452 @@ function formatRelativeTime(date) {
   if (diffDays < 7) return `${diffDays} days ago`
 
   return then.toLocaleDateString()
+}
+
+// ============================================
+// LOCAL MODS
+// ============================================
+
+export async function fetchLocalMods({ page = 0, size = 20, search = '', classification = '', sortBy = 'downloads' } = {}) {
+  let query = supabase
+    .from('mods')
+    .select(`
+      id, title, slug, description, classification, icon_path, download_count, view_count, rating_average, rating_count, created_at, updated_at,
+      author:profiles(username, avatar_url),
+      tags:mod_tags(tag:tags(name, slug)),
+      versions:mod_versions(version_number, file_path, created_at)
+    `, { count: 'exact' })
+    .eq('status', 'published')
+
+  if (search) {
+    query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`)
+  }
+
+  if (classification) {
+    query = query.eq('classification', classification)
+  }
+
+  // Sort
+  const sortMap = {
+    downloads: { column: 'download_count', ascending: false },
+    newest: { column: 'created_at', ascending: false },
+    updated: { column: 'updated_at', ascending: false },
+    title: { column: 'title', ascending: true }
+  }
+  const sort = sortMap[sortBy] || sortMap.downloads
+  query = query.order(sort.column, { ascending: sort.ascending })
+
+  // Pagination
+  query = query.range(page * size, (page + 1) * size - 1)
+
+  const { data, error, count } = await query
+
+  if (error) throw error
+
+  return {
+    mods: data.map(mod => {
+      // Get the latest version (sorted by created_at desc)
+      const sortedVersions = (mod.versions || []).sort((a, b) =>
+        new Date(b.created_at) - new Date(a.created_at)
+      )
+      const latestVersion = sortedVersions[0]
+
+      return {
+        id: mod.id,
+        title: mod.title,
+        slug: `local-${mod.slug}`,
+        description: mod.description,
+        classification: mod.classification,
+        iconUrl: getStorageUrl('mod-images', mod.icon_path),
+        downloads: mod.download_count || 0,
+        rating: parseFloat(mod.rating_average) || 0,
+        ratingCount: mod.rating_count || 0,
+        author: mod.author?.username || 'Unknown',
+        tags: mod.tags?.map(t => t.tag?.name).filter(Boolean) || [],
+        updatedAt: mod.updated_at,
+        createdAt: mod.created_at,
+        source: 'local',
+        latestVersion: latestVersion?.version_number || '1.0.0',
+        latestDownloadUrl: latestVersion?.file_path ? getStorageUrl('mods', latestVersion.file_path) : null
+      }
+    }),
+    total: count || 0,
+    page,
+    size
+  }
+}
+
+export async function fetchLocalModBySlug(slug) {
+  // Remove 'local-' prefix if present
+  const cleanSlug = slug.startsWith('local-') ? slug.slice(6) : slug
+
+  // Fetch the main mod data
+  const { data, error } = await supabase
+    .from('mods')
+    .select(`
+      *,
+      author:profiles(id, username, avatar_url),
+      tags:mod_tags(tag:tags(id, name, slug)),
+      versions:mod_versions(id, version_number, changelog, file_path, file_size, game_versions, created_at),
+      gallery:mod_gallery(id, image_path, sort_order)
+    `)
+    .eq('slug', cleanSlug)
+    .single()
+
+  if (error) throw error
+
+  // Fetch dependencies separately to avoid complex join issues
+  let dependencies = []
+  try {
+    const { data: depsData } = await supabase
+      .from('mod_dependencies')
+      .select(`
+        id,
+        dependency_type,
+        dependency_slug,
+        dependency_title,
+        dependency_mod_id
+      `)
+      .eq('mod_id', data.id)
+
+    if (depsData && depsData.length > 0) {
+      // Fetch local mod details for dependencies that reference local mods
+      const localModIds = depsData.filter(d => d.dependency_mod_id).map(d => d.dependency_mod_id)
+      let localModsMap = {}
+
+      if (localModIds.length > 0) {
+        const { data: localMods } = await supabase
+          .from('mods')
+          .select('id, title, slug, icon_path')
+          .in('id', localModIds)
+
+        if (localMods) {
+          localModsMap = Object.fromEntries(localMods.map(m => [m.id, m]))
+        }
+      }
+
+      dependencies = depsData.map(dep => {
+        const localMod = dep.dependency_mod_id ? localModsMap[dep.dependency_mod_id] : null
+        return {
+          id: dep.id,
+          type: dep.dependency_type,
+          isLocal: !!localMod,
+          slug: localMod ? `local-${localMod.slug}` : dep.dependency_slug,
+          title: localMod?.title || dep.dependency_title,
+          iconUrl: localMod?.icon_path ? getStorageUrl('mod-images', localMod.icon_path) : null
+        }
+      })
+    }
+  } catch (e) {
+    // Dependencies table might not exist or other error - continue without
+    console.log('Could not fetch dependencies:', e.message)
+  }
+
+  data.dependencies = dependencies
+
+  // Increment view count
+  try {
+    await supabase.rpc('increment_mod_view', { mod_uuid: data.id })
+  } catch (e) {
+    // Ignore errors - function may not exist yet
+  }
+
+  return {
+    id: data.id,
+    title: data.title,
+    slug: `local-${data.slug}`,
+    description: data.description,
+    about: data.about,
+    changelog: data.changelog,
+    classification: data.classification,
+    status: data.status,
+    iconUrl: getStorageUrl('mod-images', data.icon_path),
+    bannerUrl: data.banner_path ? getStorageUrl('mod-images', data.banner_path) : null,
+    downloads: data.download_count || 0,
+    viewCount: data.view_count || 0,
+    rating: parseFloat(data.rating_average) || 0,
+    ratingCount: data.rating_count || 0,
+    author: data.author?.username || 'Unknown',
+    authorId: data.author?.id,
+    tags: data.tags?.map(t => t.tag?.name).filter(Boolean) || [],
+    versions: (data.versions || [])
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .map(v => ({
+        id: v.id,
+        versionNumber: v.version_number,
+        changelog: v.changelog,
+        filePath: v.file_path,
+        fileSize: v.file_size,
+        gameVersions: v.game_versions || [],
+        createdAt: v.created_at,
+        downloadUrl: getStorageUrl('mods', v.file_path)
+      })),
+    gallery: (data.gallery || [])
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map(g => ({
+        id: g.id,
+        url: getStorageUrl('mod-images', g.image_path)
+      })),
+    dependencies: data.dependencies || [],
+    repositoryUrl: data.repository_url,
+    sourceType: data.source_type,
+    discordUrl: data.discord_url,
+    websiteUrl: data.website_url,
+    license: data.license,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+    source: 'local'
+  }
+}
+
+export async function updateLocalMod(modId, updates) {
+  const { data, error } = await supabase
+    .from('mods')
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', modId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteLocalMod(modId) {
+  // First get the mod to find file paths
+  const { data: mod } = await supabase
+    .from('mods')
+    .select('slug, icon_path, author_id, versions:mod_versions(file_path), gallery:mod_gallery(image_path)')
+    .eq('id', modId)
+    .single()
+
+  if (mod) {
+    // Delete mod files from storage
+    const filesToDelete = mod.versions?.map(v => v.file_path).filter(Boolean) || []
+    if (filesToDelete.length > 0) {
+      await supabase.storage.from('mods').remove(filesToDelete)
+    }
+
+    // Delete images from storage
+    const imagesToDelete = [
+      mod.icon_path,
+      ...(mod.gallery?.map(g => g.image_path) || [])
+    ].filter(Boolean)
+    if (imagesToDelete.length > 0) {
+      await supabase.storage.from('mod-images').remove(imagesToDelete)
+    }
+  }
+
+  // Delete the mod record (cascades to versions, tags, gallery)
+  const { error } = await supabase
+    .from('mods')
+    .delete()
+    .eq('id', modId)
+
+  if (error) throw error
+}
+
+export async function createModVersion(modId, versionData) {
+  const { data, error } = await supabase
+    .from('mod_versions')
+    .insert({
+      mod_id: modId,
+      ...versionData
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+
+  // Update mod's updated_at
+  await supabase
+    .from('mods')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', modId)
+
+  return data
+}
+
+export async function deleteModVersion(versionId, filePath) {
+  // Delete file from storage
+  if (filePath) {
+    await supabase.storage.from('mods').remove([filePath])
+  }
+
+  const { error } = await supabase
+    .from('mod_versions')
+    .delete()
+    .eq('id', versionId)
+
+  if (error) throw error
+}
+
+export async function incrementModDownload(modId) {
+  try {
+    await supabase.rpc('increment_mod_download', { mod_uuid: modId })
+  } catch (e) {
+    // Ignore errors - function may not exist yet
+  }
+}
+
+// ============================================
+// MOD DEPENDENCIES
+// ============================================
+
+export async function fetchModDependencies(modId) {
+  try {
+    const { data, error } = await supabase
+      .from('mod_dependencies')
+      .select(`
+        id,
+        dependency_type,
+        dependency_slug,
+        dependency_title,
+        dependency_mod:mods!mod_dependencies_dependency_mod_id_fkey(id, title, slug, icon_path)
+      `)
+      .eq('mod_id', modId)
+
+    if (error) {
+      // Table might not exist yet
+      console.error('Error fetching dependencies:', error)
+      return []
+    }
+
+    return data.map(dep => ({
+      id: dep.id,
+      type: dep.dependency_type,
+      isLocal: !!dep.dependency_mod,
+      slug: dep.dependency_mod ? `local-${dep.dependency_mod.slug}` : dep.dependency_slug,
+      title: dep.dependency_mod?.title || dep.dependency_title,
+      iconUrl: dep.dependency_mod?.icon_path ? getStorageUrl('mod-images', dep.dependency_mod.icon_path) : null
+    }))
+  } catch (e) {
+    console.error('Error fetching dependencies:', e)
+    return []
+  }
+}
+
+export async function addModDependency(modId, dependency) {
+  try {
+    const insertData = {
+      mod_id: modId,
+      dependency_type: dependency.type || 'required'
+    }
+
+    if (dependency.isLocal && dependency.localModId) {
+      insertData.dependency_mod_id = dependency.localModId
+    } else {
+      insertData.dependency_slug = dependency.slug
+      insertData.dependency_title = dependency.title
+    }
+
+    const { data, error } = await supabase
+      .from('mod_dependencies')
+      .insert(insertData)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
+  } catch (e) {
+    console.error('Error adding dependency:', e)
+    throw new Error('Dependencies feature not available yet. Please apply the latest database migration.')
+  }
+}
+
+export async function removeModDependency(dependencyId) {
+  try {
+    const { error } = await supabase
+      .from('mod_dependencies')
+      .delete()
+      .eq('id', dependencyId)
+
+    if (error) throw error
+  } catch (e) {
+    console.error('Error removing dependency:', e)
+    throw new Error('Dependencies feature not available yet. Please apply the latest database migration.')
+  }
+}
+
+export async function searchLocalMods(search) {
+  const { data, error } = await supabase
+    .from('mods')
+    .select('id, title, slug, icon_path')
+    .eq('status', 'published')
+    .ilike('title', `%${search}%`)
+    .limit(10)
+
+  if (error) {
+    console.error('Error searching mods:', error)
+    return []
+  }
+
+  return data.map(mod => ({
+    id: mod.id,
+    title: mod.title,
+    slug: `local-${mod.slug}`,
+    iconUrl: mod.icon_path ? getStorageUrl('mod-images', mod.icon_path) : null,
+    isLocal: true
+  }))
+}
+
+// ==================== MOD RATINGS ====================
+
+export async function rateLocalMod(modId, rating) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Must be logged in to rate')
+
+  const { data, error } = await supabase
+    .from('mod_ratings')
+    .upsert({
+      mod_id: modId,
+      user_id: user.id,
+      rating: rating,
+      updated_at: new Date().toISOString()
+    }, {
+      onConflict: 'mod_id,user_id'
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function getUserModRating(modId) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const { data, error } = await supabase
+    .from('mod_ratings')
+    .select('rating')
+    .eq('mod_id', modId)
+    .eq('user_id', user.id)
+    .single()
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('Error fetching user rating:', error)
+  }
+
+  return data?.rating || null
+}
+
+export async function getModRating(modId) {
+  const { data, error } = await supabase
+    .from('mods')
+    .select('rating_average, rating_count')
+    .eq('id', modId)
+    .single()
+
+  if (error) {
+    console.error('Error fetching mod rating:', error)
+    return { average: 0, count: 0 }
+  }
+
+  return {
+    average: parseFloat(data.rating_average) || 0,
+    count: data.rating_count || 0
+  }
 }

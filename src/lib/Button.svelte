@@ -22,7 +22,10 @@
 
 <style>
   .btn {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
     padding: 0.5rem 1.25rem;
     font-family: 'Cinzel', serif;
     font-weight: 600;
@@ -33,6 +36,12 @@
     border-radius: 3px;
     cursor: pointer;
     transition: all 0.15s ease;
+  }
+
+  .btn :global(svg) {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
   }
 
   .btn-primary {

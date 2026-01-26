@@ -4,6 +4,8 @@
   import Footer from './Footer.svelte'
   import Panel from './Panel.svelte'
   import Button from './Button.svelte'
+  import { auth } from './stores/auth.svelte.js'
+  import { fetchLocalMods } from './stores/data.svelte.js'
   import {
     searchProjects,
     getTags,
@@ -28,6 +30,7 @@
   let search = $state('')
   let classificationFilter = $state('')
   let sortBy = $state('downloads')
+  let sourceFilter = $state('all') // 'all', 'modtale', 'community'
   let currentPage = $state(0)
   const pageSize = 20
 
@@ -46,16 +49,61 @@
     loading = true
     error = null
     try {
-      const result = await withTimeout(searchProjects({
-        search,
-        page: currentPage,
-        size: pageSize,
-        sort: sortBy,
-        classification: classificationFilter
-      }))
-      mods = result.projects
-      totalCount = result.pagination.totalElements
-      totalPages = result.pagination.totalPages
+      let allMods = []
+      let modtaleCount = 0
+      let localCount = 0
+
+      // Fetch from Modtale if not filtering to community only
+      if (sourceFilter !== 'community') {
+        try {
+          const modtaleResult = await withTimeout(searchProjects({
+            search,
+            page: currentPage,
+            size: pageSize,
+            sort: sortBy,
+            classification: classificationFilter
+          }))
+          allMods = modtaleResult.projects.map(m => ({ ...m, source: 'modtale' }))
+          modtaleCount = modtaleResult.pagination.totalElements
+        } catch (e) {
+          console.error('Error loading Modtale mods:', e)
+          // Continue with local mods even if Modtale fails
+        }
+      }
+
+      // Fetch local mods if not filtering to modtale only
+      if (sourceFilter !== 'modtale') {
+        try {
+          const localResult = await fetchLocalMods({
+            page: currentPage,
+            size: pageSize,
+            search,
+            classification: classificationFilter,
+            sortBy
+          })
+          localCount = localResult.total
+
+          if (sourceFilter === 'community') {
+            // Only show local mods
+            allMods = localResult.mods
+          } else {
+            // Merge with Modtale mods - local mods first on page 0
+            if (currentPage === 0) {
+              allMods = [...localResult.mods, ...allMods]
+            } else {
+              allMods = [...allMods]
+            }
+          }
+        } catch (e) {
+          console.error('Error loading local mods:', e)
+        }
+      }
+
+      mods = allMods
+      totalCount = sourceFilter === 'community' ? localCount :
+                   sourceFilter === 'modtale' ? modtaleCount :
+                   modtaleCount + localCount
+      totalPages = Math.ceil(totalCount / pageSize)
     } catch (e) {
       console.error('Error loading mods:', e)
       error = e.message
@@ -119,6 +167,16 @@
     const option = classificationOptions.find(o => o.value === classification)
     return option ? option.label : classification
   }
+
+  // Get download URL for both local and Modtale mods
+  function getModDownloadUrl(mod) {
+    if (mod.source === 'local') {
+      // Local mods have latestDownloadUrl set from fetchLocalMods
+      return mod.latestDownloadUrl
+    }
+    // Modtale mods use the API function
+    return getLatestDownloadUrl(mod)
+  }
 </script>
 
 <div class="page">
@@ -132,6 +190,15 @@
           <h1 class="page-title">Mods</h1>
           <p class="page-subtitle">Browse Hytale mods, plugins, and content packs</p>
         </div>
+        {#if auth.isAuthenticated}
+          <Button variant="primary" onclick={() => onnavigate('mod-upload')}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Upload Mod
+          </Button>
+        {/if}
       </div>
 
       <!-- Filters -->
@@ -148,6 +215,15 @@
                 placeholder="Search mods..."
                 oninput={handleSearchInput}
               />
+            </div>
+
+            <div class="filter-group">
+              <label class="filter-label">Source</label>
+              <select bind:value={sourceFilter} onchange={handleFilterChange}>
+                <option value="all">All Mods</option>
+                <option value="community">Community</option>
+                <option value="modtale">Modtale</option>
+              </select>
             </div>
 
             <div class="filter-group">
@@ -240,7 +316,10 @@
 
                 <div class="mod-categories">
                   <span class="category-tag type-tag">{getClassificationLabel(mod.classification)}</span>
-                  {#each mod.tags.slice(0, 2) as tag}
+                  {#if mod.source === 'local'}
+                    <span class="category-tag source-tag">Community</span>
+                  {/if}
+                  {#each (mod.tags || []).slice(0, 2) as tag}
                     <span class="category-tag">{tag}</span>
                   {/each}
                 </div>
@@ -273,9 +352,9 @@
               </div>
 
               <div class="mod-actions">
-                {#if getLatestDownloadUrl(mod)}
+                {#if getModDownloadUrl(mod)}
                   <a
-                    href={getLatestDownloadUrl(mod)}
+                    href={getModDownloadUrl(mod)}
                     class="download-btn"
                     title="Download latest version"
                     onclick={(e) => e.stopPropagation()}
@@ -600,6 +679,12 @@
     background: rgba(107, 184, 204, 0.15);
     border-color: rgba(107, 184, 204, 0.4);
     color: #6bb8cc;
+  }
+
+  .source-tag {
+    background: rgba(126, 196, 123, 0.15);
+    border-color: rgba(126, 196, 123, 0.4);
+    color: #7ec47b;
   }
 
   .mod-stats {

@@ -2,25 +2,33 @@
   import { onMount } from 'svelte'
   import Button from './Button.svelte'
   import { supabase } from './supabase.js'
+  import { searchProjects } from './modtale.js'
 
   let { onnavigate = () => {} } = $props()
 
-  let stats = $state({ builds: 0, servers: 0, users: 0 })
+  let stats = $state({ mods: 0, builds: 0, servers: 0, users: 0 })
   let loading = $state(true)
 
   onMount(async () => {
     try {
       const [
+        { count: localModsCount },
         { count: buildsCount },
         { count: serversCount },
-        { count: usersCount }
+        { count: usersCount },
+        modtaleResult
       ] = await Promise.all([
+        supabase.from('mods').select('*', { count: 'exact', head: true }).eq('status', 'published'),
         supabase.from('builds').select('*', { count: 'exact', head: true }).eq('status', 'published'),
         supabase.from('servers').select('*', { count: 'exact', head: true }),
-        supabase.from('profiles').select('*', { count: 'exact', head: true })
+        supabase.from('profiles').select('*', { count: 'exact', head: true }),
+        searchProjects({ size: 1 }).catch(() => ({ pagination: { totalElements: 0 } }))
       ])
 
+      const modtaleModsCount = modtaleResult?.pagination?.totalElements || 0
+
       stats = {
+        mods: (localModsCount || 0) + modtaleModsCount,
         builds: buildsCount || 0,
         servers: serversCount || 0,
         users: usersCount || 0
@@ -63,6 +71,17 @@
     </div>
 
     <div class="hero-stats">
+      <div class="stat">
+        <div class="stat-value blue">
+          {#if loading}
+            <span class="stat-loader"></span>
+          {:else}
+            {formatNumber(stats.mods)}
+          {/if}
+        </div>
+        <div class="stat-label">Mods</div>
+      </div>
+      <div class="stat-divider"></div>
       <div class="stat">
         <div class="stat-value gold">
           {#if loading}
