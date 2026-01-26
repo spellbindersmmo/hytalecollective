@@ -1,8 +1,12 @@
 <script>
+  import { marked } from 'marked'
   import Navbar from './Navbar.svelte'
   import Footer from './Footer.svelte'
   import Panel from './Panel.svelte'
   import Button from './Button.svelte'
+  import DiscussionSection from './DiscussionSection.svelte'
+  import { auth } from './stores/auth.svelte.js'
+  import { addFavorite, removeFavorite, checkFavorite } from './stores/data.svelte.js'
   import {
     getProject,
     formatDownloads,
@@ -13,12 +17,56 @@
     classificationOptions
   } from './modtale.js'
 
+  // Configure marked for safe rendering
+  marked.setOptions({
+    breaks: true,
+    gfm: true
+  })
+
   let { modSlug = '', onnavigate = () => {} } = $props()
 
   // State
   let mod = $state(null)
   let loading = $state(true)
   let error = $state(null)
+  let isFavorited = $state(false)
+  let favoriting = $state(false)
+  let lightboxIndex = $state(null)
+
+  // Lightbox helpers
+  const lightboxImage = $derived(
+    lightboxIndex !== null && mod?.gallery?.[lightboxIndex]
+      ? (mod.gallery[lightboxIndex].url || mod.gallery[lightboxIndex])
+      : null
+  )
+
+  function openLightbox(index) {
+    lightboxIndex = index
+    document.addEventListener('keydown', handleLightboxKeydown)
+  }
+
+  function closeLightbox() {
+    lightboxIndex = null
+    document.removeEventListener('keydown', handleLightboxKeydown)
+  }
+
+  function nextImage() {
+    if (mod?.gallery && lightboxIndex < mod.gallery.length - 1) {
+      lightboxIndex++
+    }
+  }
+
+  function prevImage() {
+    if (lightboxIndex > 0) {
+      lightboxIndex--
+    }
+  }
+
+  function handleLightboxKeydown(e) {
+    if (e.key === 'Escape') closeLightbox()
+    if (e.key === 'ArrowRight') nextImage()
+    if (e.key === 'ArrowLeft') prevImage()
+  }
 
   // Classification badge colors
   const classificationColors = {
@@ -41,11 +89,38 @@
 
     try {
       mod = await getProject(modSlug)
+      // Check if mod is favorited (using slug as identifier)
+      if (auth.isAuthenticated && mod) {
+        isFavorited = await checkFavorite('mod', mod.slug)
+      }
     } catch (e) {
       console.error('Error loading mod:', e)
       error = 'Mod not found'
     } finally {
       loading = false
+    }
+  }
+
+  async function toggleFavorite() {
+    if (!auth.isAuthenticated) {
+      auth.openModal()
+      return
+    }
+    if (favoriting) return
+
+    favoriting = true
+    try {
+      if (isFavorited) {
+        await removeFavorite('mod', mod.slug)
+        isFavorited = false
+      } else {
+        await addFavorite('mod', mod.slug)
+        isFavorited = true
+      }
+    } catch (e) {
+      console.error('Error toggling favorite:', e)
+    } finally {
+      favoriting = false
     }
   }
 
@@ -72,6 +147,7 @@
 
   const latestVersion = $derived(mod ? getLatestVersion(mod) : null)
   const badgeColor = $derived(mod ? (classificationColors[mod.classification] || '#6bb8cc') : '#6bb8cc')
+  const renderedDescription = $derived(mod?.description ? marked.parse(mod.description) : '')
 </script>
 
 <div class="page">
@@ -108,15 +184,7 @@
           </div>
         </Panel>
       {:else if mod}
-        <!-- Banner -->
-        {#if mod.bannerUrl}
-          <div class="banner">
-            <img src={mod.bannerUrl} alt="{mod.title} banner" />
-            <div class="banner-overlay"></div>
-          </div>
-        {/if}
-
-        <div class="content-layout" class:has-banner={mod.bannerUrl}>
+        <div class="content-layout">
           <!-- Main Content -->
           <div class="main-content">
             <Panel>
@@ -164,8 +232,12 @@
             <Panel>
               <div class="description-section">
                 <h3 class="section-label">About</h3>
-                <div class="description">
-                  {mod.about || mod.description || 'No description provided.'}
+                <div class="description markdown-content">
+                  {#if mod.about || mod.description}
+                    {@html marked.parse(mod.about || mod.description)}
+                  {:else}
+                    No description provided.
+                  {/if}
                 </div>
               </div>
             </Panel>
@@ -208,13 +280,27 @@
                 <div class="gallery-section">
                   <h3 class="section-label">Gallery</h3>
                   <div class="gallery-grid">
-                    {#each mod.gallery as image}
-                      <img src={image.url || image} alt="Gallery" class="gallery-image" />
+                    {#each mod.gallery as image, index}
+                      <button
+                        class="gallery-item"
+                        onclick={() => openLightbox(index)}
+                      >
+                        <img src={image.url || image} alt="Gallery" class="gallery-image" />
+                      </button>
                     {/each}
                   </div>
                 </div>
               </Panel>
             {/if}
+
+            <!-- Discussion -->
+            <Panel>
+              <DiscussionSection
+                contentType="mod"
+                contentId={mod.slug}
+                {onnavigate}
+              />
+            </Panel>
           </div>
 
           <!-- Sidebar -->
@@ -239,6 +325,18 @@
                 {:else}
                   <p class="no-downloads">No downloads available</p>
                 {/if}
+
+                <button
+                  class="save-btn"
+                  class:saved={isFavorited}
+                  onclick={toggleFavorite}
+                  disabled={favoriting}
+                >
+                  <svg viewBox="0 0 24 24" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="2">
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                  </svg>
+                  {favoriting ? 'Saving...' : isFavorited ? 'Saved' : 'Save'}
+                </button>
               </div>
             </Panel>
 
@@ -336,6 +434,45 @@
   <Footer {onnavigate} />
 </div>
 
+<!-- Lightbox Modal -->
+{#if lightboxImage}
+  <div class="lightbox-overlay" onclick={closeLightbox}>
+    <button class="lightbox-close" onclick={closeLightbox}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="6" x2="6" y2="18" />
+        <line x1="6" y1="6" x2="18" y2="18" />
+      </svg>
+    </button>
+
+    {#if lightboxIndex > 0}
+      <button class="lightbox-nav lightbox-prev" onclick={(e) => { e.stopPropagation(); prevImage(); }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      </button>
+    {/if}
+
+    <img
+      src={lightboxImage}
+      alt="Gallery image"
+      class="lightbox-image"
+      onclick={(e) => e.stopPropagation()}
+    />
+
+    {#if mod?.gallery && lightboxIndex < mod.gallery.length - 1}
+      <button class="lightbox-nav lightbox-next" onclick={(e) => { e.stopPropagation(); nextImage(); }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </button>
+    {/if}
+
+    <div class="lightbox-counter" onclick={(e) => e.stopPropagation()}>
+      {lightboxIndex + 1} / {mod?.gallery?.length || 0}
+    </div>
+  </div>
+{/if}
+
 <style>
   .page {
     min-height: 100vh;
@@ -376,37 +513,11 @@
     height: 18px;
   }
 
-  /* Banner */
-  .banner {
-    position: relative;
-    width: 100%;
-    height: 200px;
-    border-radius: 8px;
-    overflow: hidden;
-    margin-bottom: -80px;
-  }
-
-  .banner img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .banner-overlay {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(to bottom, transparent 0%, rgba(22, 18, 14, 0.9) 100%);
-  }
-
   /* Layout */
   .content-layout {
     display: grid;
     grid-template-columns: 1fr;
     gap: 1.5rem;
-  }
-
-  .content-layout.has-banner {
-    padding-top: 60px;
   }
 
   @media (min-width: 1024px) {
@@ -451,6 +562,7 @@
 
   .mod-icon {
     object-fit: cover;
+    object-position: center;
     border: 1px solid #4a3f32;
   }
 
@@ -549,7 +661,134 @@
     font-size: 0.95rem;
     color: #c4b8a4;
     line-height: 1.6;
-    white-space: pre-wrap;
+  }
+
+  /* Markdown Content Styles */
+  .markdown-content :global(h1),
+  .markdown-content :global(h2),
+  .markdown-content :global(h3),
+  .markdown-content :global(h4),
+  .markdown-content :global(h5),
+  .markdown-content :global(h6) {
+    color: #f5d898;
+    margin: 1.5rem 0 0.75rem 0;
+    line-height: 1.3;
+  }
+
+  .markdown-content :global(h1) { font-size: 1.5rem; }
+  .markdown-content :global(h2) { font-size: 1.3rem; }
+  .markdown-content :global(h3) { font-size: 1.15rem; }
+  .markdown-content :global(h4) { font-size: 1rem; }
+
+  .markdown-content :global(h1:first-child),
+  .markdown-content :global(h2:first-child),
+  .markdown-content :global(h3:first-child) {
+    margin-top: 0;
+  }
+
+  .markdown-content :global(p) {
+    margin: 0.75rem 0;
+  }
+
+  .markdown-content :global(ul),
+  .markdown-content :global(ol) {
+    margin: 0.75rem 0;
+    padding-left: 1.5rem;
+  }
+
+  .markdown-content :global(li) {
+    margin: 0.35rem 0;
+  }
+
+  .markdown-content :global(a) {
+    color: #6bb8cc;
+    text-decoration: none;
+  }
+
+  .markdown-content :global(a:hover) {
+    text-decoration: underline;
+  }
+
+  .markdown-content :global(code) {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.85em;
+    color: #e8c36b;
+  }
+
+  .markdown-content :global(pre) {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 1rem 0;
+  }
+
+  .markdown-content :global(pre code) {
+    background: none;
+    padding: 0;
+    font-size: 0.85rem;
+    color: #c4b8a4;
+  }
+
+  .markdown-content :global(blockquote) {
+    margin: 1rem 0;
+    padding: 0.75rem 1rem;
+    border-left: 3px solid #d4a44c;
+    background: rgba(212, 164, 76, 0.1);
+    color: #e8c36b;
+  }
+
+  .markdown-content :global(blockquote p) {
+    margin: 0;
+  }
+
+  .markdown-content :global(hr) {
+    border: none;
+    border-top: 1px solid #3d3428;
+    margin: 1.5rem 0;
+  }
+
+  .markdown-content :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.85rem;
+  }
+
+  .markdown-content :global(th),
+  .markdown-content :global(td) {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #3d3428;
+    text-align: left;
+  }
+
+  .markdown-content :global(th) {
+    background: rgba(0, 0, 0, 0.2);
+    color: #f5d898;
+    font-weight: 600;
+  }
+
+  .markdown-content :global(tr:nth-child(even)) {
+    background: rgba(0, 0, 0, 0.1);
+  }
+
+  .markdown-content :global(strong) {
+    color: #f0e6d8;
+    font-weight: 600;
+  }
+
+  .markdown-content :global(em) {
+    font-style: italic;
+  }
+
+  .markdown-content :global(img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    margin: 0.5rem 0;
   }
 
   /* Versions */
@@ -627,18 +866,123 @@
     gap: 0.75rem;
   }
 
+  .gallery-item {
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+
   .gallery-image {
     width: 100%;
     aspect-ratio: 16/9;
     object-fit: cover;
     border-radius: 4px;
     border: 1px solid #3d3428;
-    cursor: pointer;
-    transition: border-color 0.15s;
+    transition: border-color 0.15s, transform 0.15s;
   }
 
-  .gallery-image:hover {
-    border-color: #6b5a48;
+  .gallery-item:hover .gallery-image {
+    border-color: #d4a44c;
+    transform: scale(1.02);
+  }
+
+  /* Lightbox */
+  .lightbox-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 2rem;
+    cursor: pointer;
+  }
+
+  .lightbox-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    width: 44px;
+    height: 44px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #4a3f32;
+    border-radius: 50%;
+    color: #c4b8a4;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+
+  .lightbox-close:hover {
+    background: rgba(0, 0, 0, 0.8);
+    border-color: #d4a44c;
+    color: #f0e6d8;
+  }
+
+  .lightbox-close svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .lightbox-image {
+    max-width: 90vw;
+    max-height: 85vh;
+    object-fit: contain;
+    border-radius: 8px;
+    cursor: default;
+  }
+
+  .lightbox-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 48px;
+    height: 48px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #4a3f32;
+    border-radius: 50%;
+    color: #c4b8a4;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+
+  .lightbox-nav:hover {
+    background: rgba(0, 0, 0, 0.8);
+    border-color: #d4a44c;
+    color: #f0e6d8;
+  }
+
+  .lightbox-nav svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .lightbox-prev {
+    left: 1rem;
+  }
+
+  .lightbox-next {
+    right: 1rem;
+  }
+
+  .lightbox-counter {
+    position: absolute;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.5rem 1rem;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid #4a3f32;
+    border-radius: 20px;
+    color: #c4b8a4;
+    font-size: 0.85rem;
   }
 
   /* Download Section */
@@ -685,6 +1029,50 @@
     color: #6a5a4a;
     font-size: 0.9rem;
     margin: 0;
+  }
+
+  .save-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    margin-top: 0.75rem;
+    padding: 0.6rem 1rem;
+    background: linear-gradient(180deg, #3a3127 0%, #302820 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 6px;
+    color: #c4b8a4;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .save-btn:hover:not(:disabled) {
+    border-color: #6b5a48;
+    color: #f0e6d8;
+  }
+
+  .save-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .save-btn.saved {
+    background: linear-gradient(180deg, #3a4a3a 0%, #2d3a2d 100%);
+    border-color: #4a6a4a;
+    color: #b8e0b8;
+  }
+
+  .save-btn.saved:hover:not(:disabled) {
+    border-color: #5a8a5a;
+    color: #d4f0d4;
+  }
+
+  .save-btn svg {
+    width: 16px;
+    height: 16px;
   }
 
   /* Stats */

@@ -15,9 +15,13 @@
     onclick = null
   } = $props()
 
+  // Track if server has no query plugin (pending/unverified)
+  const hasNoQueryPlugin = $derived(status === 'pending')
+
   // Handle both old 'online' boolean prop and new 'status' string prop
+  // Unverified (pending) servers display as online to regular users
   const serverStatus = $derived(
-    status === 'pending' ? 'pending' :
+    status === 'pending' ? 'online' :
     status === 'online' || online === true ? 'online' : 'offline'
   )
 
@@ -81,15 +85,15 @@
         <div class="server-stats">
           <div class="stat-row">
             <span class="status-indicator" class:online={serverStatus === 'online'} class:pending={serverStatus === 'pending'}></span>
-            <span class="player-count" class:online={serverStatus === 'online'} class:pending={serverStatus === 'pending'}>
-              {#if serverStatus === 'pending'}
+            <span class="player-count" class:online={serverStatus === 'online'} class:pending={hasNoQueryPlugin}>
+              {#if hasNoQueryPlugin}
                 N/A
               {:else}
                 {players}/{maxPlayers}
               {/if}
             </span>
           </div>
-          <div class="player-label">{serverStatus === 'pending' ? 'no query plugin' : 'players'}</div>
+          <div class="player-label">{hasNoQueryPlugin ? 'no query plugin' : 'players'}</div>
 
           {#if votes > 0}
             <div class="votes">

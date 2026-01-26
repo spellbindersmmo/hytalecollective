@@ -291,28 +291,18 @@
                     </svg>
                     {formatNumber(build.download_count || 0)}
                   </span>
-                  {#if build.total_votes > 0}
-                    <span class="stat vote-stat">
-                      <svg viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                      </svg>
-                      {formatNumber(build.total_votes)}
-                    </span>
-                  {/if}
-                  {#if build.block_count}
-                    <span class="stat">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                      </svg>
-                      {formatNumber(build.block_count)}
-                    </span>
-                  {/if}
                   <span class="stat">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
                       <circle cx="12" cy="12" r="3" />
                     </svg>
                     {formatNumber(build.view_count || 0)}
+                  </span>
+                  <span class="stat vote-stat">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                    </svg>
+                    {formatNumber(build.total_votes || 0)}
                   </span>
                 </div>
               </div>

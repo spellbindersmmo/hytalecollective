@@ -3,9 +3,10 @@
   import Footer from './Footer.svelte'
   import Panel from './Panel.svelte'
   import Button from './Button.svelte'
+  import DiscussionSection from './DiscussionSection.svelte'
   import { auth } from './stores/auth.svelte.js'
   import { supabase } from './supabase.js'
-  import { fetchServerBySlug, voteForServer, checkUserVote } from './stores/data.svelte.js'
+  import { fetchServerBySlug, voteForServer, checkUserVote, addFavorite, removeFavorite, checkFavorite } from './stores/data.svelte.js'
 
   let { serverSlug = '', onnavigate = () => {} } = $props()
 
@@ -17,6 +18,8 @@
   let voting = $state(false)
   let voteError = $state(null)
   let copied = $state(false)
+  let isFavorited = $state(false)
+  let favoriting = $state(false)
 
   // Owner panel state
   let showOwnerPanel = $state(false)
@@ -51,9 +54,14 @@
     try {
       server = await fetchServerBySlug(serverSlug)
 
-      // Check if user has voted today
+      // Check if user has voted today and if item is favorited
       if (auth.isAuthenticated) {
-        hasVotedToday = await checkUserVote(server.id)
+        const [voted, favorited] = await Promise.all([
+          checkUserVote(server.id),
+          checkFavorite('server', server.id)
+        ])
+        hasVotedToday = voted
+        isFavorited = favorited
       }
     } catch (e) {
       console.error('Error loading server:', e)
@@ -82,6 +90,29 @@
       voteError = e.message
     } finally {
       voting = false
+    }
+  }
+
+  async function toggleFavorite() {
+    if (!auth.isAuthenticated) {
+      auth.openModal()
+      return
+    }
+    if (favoriting) return
+
+    favoriting = true
+    try {
+      if (isFavorited) {
+        await removeFavorite('server', server.id)
+        isFavorited = false
+      } else {
+        await addFavorite('server', server.id)
+        isFavorited = true
+      }
+    } catch (e) {
+      console.error('Error toggling favorite:', e)
+    } finally {
+      favoriting = false
     }
   }
 
@@ -322,6 +353,15 @@
                 </div>
               </Panel>
             {/if}
+
+            <!-- Discussion -->
+            <Panel>
+              <DiscussionSection
+                contentType="server"
+                contentId={server.id}
+                {onnavigate}
+              />
+            </Panel>
           </div>
 
           <!-- Sidebar -->
@@ -360,6 +400,18 @@
                     Login to vote for this server
                   </button>
                 {/if}
+
+                <button
+                  class="save-btn"
+                  class:saved={isFavorited}
+                  onclick={toggleFavorite}
+                  disabled={favoriting}
+                >
+                  <svg viewBox="0 0 24 24" fill={isFavorited ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="2">
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                  </svg>
+                  {favoriting ? 'Saving...' : isFavorited ? 'Saved' : 'Save'}
+                </button>
               </div>
             </Panel>
 
@@ -947,6 +999,50 @@
   .vote-hint-btn:hover {
     color: #e8c36b;
     text-decoration: underline;
+  }
+
+  .save-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    margin-top: 0.75rem;
+    padding: 0.6rem 1rem;
+    background: linear-gradient(180deg, #3a3127 0%, #302820 100%);
+    border: 1px solid #4a3f32;
+    border-radius: 6px;
+    color: #c4b8a4;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .save-btn:hover:not(:disabled) {
+    border-color: #6b5a48;
+    color: #f0e6d8;
+  }
+
+  .save-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .save-btn.saved {
+    background: linear-gradient(180deg, #3a4a3a 0%, #2d3a2d 100%);
+    border-color: #4a6a4a;
+    color: #b8e0b8;
+  }
+
+  .save-btn.saved:hover:not(:disabled) {
+    border-color: #5a8a5a;
+    color: #d4f0d4;
+  }
+
+  .save-btn svg {
+    width: 16px;
+    height: 16px;
   }
 
   /* Links */

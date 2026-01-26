@@ -8,6 +8,7 @@
   import ServerCard from './ServerCard.svelte'
   import { auth } from './stores/auth.svelte.js'
   import { supabase, getStorageUrl } from './supabase.js'
+  import { fetchUserFavorites } from './stores/data.svelte.js'
 
   let { username = '', onnavigate = () => {} } = $props()
 
@@ -15,6 +16,7 @@
   let builds = $state([])
   let servers = $state([])
   let forumPosts = $state([])
+  let favorites = $state({ builds: [], mods: [], servers: [] })
   let stats = $state({ builds: 0, downloads: 0, posts: 0, servers: 0, points: 0 })
   let loading = $state(true)
   let activeTab = $state('builds')
@@ -127,6 +129,11 @@
         posts: postsCount || 0,
         servers: serversCount || 0,
         points
+      }
+
+      // Load favorites if viewing own profile
+      if (auth.profile?.username === username) {
+        favorites = await fetchUserFavorites()
       }
 
     } catch (e) {
@@ -302,6 +309,15 @@
           >
             Activity
           </button>
+          {#if isOwnProfile}
+            <button
+              class="tab"
+              class:active={activeTab === 'saved'}
+              onclick={() => activeTab = 'saved'}
+            >
+              Saved
+            </button>
+          {/if}
         </div>
 
         <!-- Tab Content -->
@@ -424,6 +440,79 @@
                   {/each}
                 </div>
               </Panel>
+            {/if}
+          {:else if activeTab === 'saved' && isOwnProfile}
+            {#if favorites.builds.length === 0 && favorites.mods.length === 0 && favorites.servers.length === 0}
+              <Panel>
+                <div class="empty-state">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                  </svg>
+                  <p>No saved items yet. Save builds, mods, and servers to see them here.</p>
+                </div>
+              </Panel>
+            {:else}
+              {#if favorites.builds.length > 0}
+                <div class="saved-section">
+                  <h3 class="saved-section-title">Saved Builds</h3>
+                  <div class="content-grid">
+                    {#each favorites.builds as build}
+                      <BuildCard
+                        title={build.title}
+                        slug={build.slug}
+                        author={build.author?.username}
+                        thumbnail={build.thumbnail}
+                      />
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              {#if favorites.mods.length > 0}
+                <div class="saved-section">
+                  <h3 class="saved-section-title">Saved Mods</h3>
+                  <div class="saved-mods-list">
+                    {#each favorites.mods as mod}
+                      <button
+                        class="saved-mod-item"
+                        onclick={() => onnavigate(`mod-${mod.slug}`)}
+                      >
+                        {#if mod.thumbnail}
+                          <img src={mod.thumbnail} alt={mod.title} class="saved-mod-thumb" />
+                        {:else}
+                          <div class="saved-mod-thumb-placeholder">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            </svg>
+                          </div>
+                        {/if}
+                        <div class="saved-mod-info">
+                          <span class="saved-mod-title">{mod.title}</span>
+                          <span class="saved-mod-author">by {mod.author}</span>
+                        </div>
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              {#if favorites.servers.length > 0}
+                <div class="saved-section">
+                  <h3 class="saved-section-title">Saved Servers</h3>
+                  <div class="servers-grid">
+                    {#each favorites.servers as server}
+                      <ServerCard
+                        name={server.name}
+                        slug={server.slug}
+                        players={server.current_players || 0}
+                        maxPlayers={server.max_players || 100}
+                        status={server.status}
+                        icon={server.icon}
+                      />
+                    {/each}
+                  </div>
+                </div>
+              {/if}
             {/if}
           {/if}
         </div>
@@ -847,5 +936,90 @@
     align-items: flex-end;
     font-size: 0.75rem;
     color: #6b5a48;
+  }
+
+  /* Saved Section */
+  .saved-section {
+    margin-bottom: 1.5rem;
+  }
+
+  .saved-section:last-child {
+    margin-bottom: 0;
+  }
+
+  .saved-section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #f5d898;
+    margin: 0 0 1rem 0;
+  }
+
+  .saved-mods-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .saved-mod-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.75rem;
+    background: linear-gradient(180deg, #2a241c 0%, #242018 100%);
+    border: 1px solid #3d3428;
+    border-radius: 6px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .saved-mod-item:hover {
+    border-color: #6b5a48;
+  }
+
+  .saved-mod-thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: 4px;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+
+  .saved-mod-thumb-placeholder {
+    width: 48px;
+    height: 48px;
+    border-radius: 4px;
+    background: linear-gradient(180deg, #3a3127 0%, #302820 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #6a5a4a;
+    flex-shrink: 0;
+  }
+
+  .saved-mod-thumb-placeholder svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .saved-mod-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .saved-mod-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #f0e6d8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .saved-mod-author {
+    font-size: 0.8rem;
+    color: #8a7a6a;
   }
 </style>

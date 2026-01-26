@@ -233,7 +233,9 @@
                 <option value="all">All</option>
                 <option value="online">Online</option>
                 <option value="offline">Offline</option>
-                <option value="pending">Unverified</option>
+                {#if auth.isAdmin}
+                  <option value="pending">Unverified</option>
+                {/if}
               </select>
             </div>
 

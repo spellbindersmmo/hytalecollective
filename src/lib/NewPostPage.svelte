@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import { marked } from 'marked'
   import Navbar from './Navbar.svelte'
   import Footer from './Footer.svelte'
   import Panel from './Panel.svelte'
@@ -8,6 +9,12 @@
   import { auth } from './stores/auth.svelte.js'
   import { supabase, getStorageUrl } from './supabase.js'
   import { generateUniqueSlug } from './utils.js'
+
+  // Configure marked for safe rendering
+  marked.setOptions({
+    breaks: true,
+    gfm: true
+  })
 
   let { categorySlug = '', onnavigate = () => {} } = $props()
 
@@ -45,40 +52,28 @@
     return category?.slug === 'guides'
   })
 
-  // Markdown renderer
+  // Markdown renderer using marked library with post reference support
   function renderMarkdown(text) {
     if (!text) return '<span class="empty-preview">Preview will appear here...</span>'
 
-    let html = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/```([\s\S]*?)```/g, '<pre class="code-block">$1</pre>')
-      .replace(/^### (.+)$/gm, '<h4 class="md-h3">$1</h4>')
-      .replace(/^## (.+)$/gm, '<h3 class="md-h2">$1</h3>')
-      .replace(/^# (.+)$/gm, '<h2 class="md-h1">$1</h2>')
-      .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/~~(.+?)~~/g, '<del>$1</del>')
-      .replace(/\+\+(.+?)\+\+/g, '<u>$1</u>')
-      .replace(/^---$/gm, '<hr class="md-divider" />')
-      .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
-      .replace(/!\[([^\]]*)\]\(([^)#]+)#(small|medium|large)\)/g, '<img src="$2" alt="$1" class="md-image md-image-$3" loading="lazy" decoding="async" />')
-      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="md-image" loading="lazy" decoding="async" />')
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-      .replace(/^&gt; (.+)$/gm, '<blockquote class="md-quote">$1</blockquote>')
-      .replace(/^- (.+)$/gm, '<li class="md-bullet">$1</li>')
-      .replace(/^\d+\. (.+)$/gm, '<li class="md-numbered">$1</li>')
-      // Post references - {{ref:slug|title|category|color}}
-      .replace(/\{\{ref:([^|]+)\|([^|]+)\|([^|]+)\|([^}]+)\}\}/g, (match, refSlug, title, category, color) => {
-        return `<a href="#" class="post-reference" data-post-ref="${refSlug}">
-          <span class="post-ref-category" style="background: ${color}20; color: ${color}; border-color: ${color}40;">${category}</span>
-          <span class="post-ref-title">${title}</span>
-          <span class="post-ref-arrow">→</span>
-        </a>`
-      })
-      .replace(/\n/g, '<br />')
+    // Pre-process: Ensure horizontal rules have blank lines around them
+    // This prevents marked from interpreting "text\n---" as a setext heading
+    let processed = text.replace(/^(---+)$/gm, '\n$1\n')
+
+    // Parse with marked
+    let html = marked.parse(processed)
+
+    // Then handle custom post references - {{ref:slug|title|category|color}}
+    html = html.replace(/\{\{ref:([^|]+)\|([^|]+)\|([^|]+)\|([^}]+)\}\}/g, (match, refSlug, title, category, color) => {
+      return `<a href="#" class="post-reference" data-post-ref="${refSlug}">
+        <span class="post-ref-category" style="background: ${color}20; color: ${color}; border-color: ${color}40;">${category}</span>
+        <span class="post-ref-title">${title}</span>
+        <span class="post-ref-arrow">→</span>
+      </a>`
+    })
+
+    // Handle underline syntax (++text++) - not standard markdown
+    html = html.replace(/\+\+(.+?)\+\+/g, '<u>$1</u>')
 
     return html
   }
@@ -1507,31 +1502,56 @@
     font-style: italic;
   }
 
-  /* Markdown Styles */
-  .markdown-content :global(h2.md-h1) {
-    font-size: 1.5rem;
-    font-weight: 700;
+  /* Markdown Styles - Using marked library output */
+  .markdown-content :global(h1),
+  .markdown-content :global(h2),
+  .markdown-content :global(h3),
+  .markdown-content :global(h4),
+  .markdown-content :global(h5),
+  .markdown-content :global(h6) {
     color: #f5d898;
-    margin: 0.5rem 0;
+    margin: 1.5rem 0 0.75rem 0;
+    line-height: 1.3;
   }
 
-  .markdown-content :global(h3.md-h2) {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: #f0e6d8;
-    margin: 0.5rem 0;
+  .markdown-content :global(h1) { font-size: 1.5rem; }
+  .markdown-content :global(h2) { font-size: 1.3rem; }
+  .markdown-content :global(h3) { font-size: 1.15rem; }
+  .markdown-content :global(h4) { font-size: 1rem; }
+
+  .markdown-content :global(h1:first-child),
+  .markdown-content :global(h2:first-child),
+  .markdown-content :global(h3:first-child) {
+    margin-top: 0;
   }
 
-  .markdown-content :global(h4.md-h3) {
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #e0d6c8;
+  .markdown-content :global(p) {
+    margin: 0.75rem 0;
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  .markdown-content :global(p:first-child) {
+    margin-top: 0;
+  }
+
+  .markdown-content :global(p:last-child) {
+    margin-bottom: 0;
+  }
+
+  .markdown-content :global(ul),
+  .markdown-content :global(ol) {
+    margin: 0.75rem 0;
+    padding-left: 1.5rem;
+  }
+
+  .markdown-content :global(li) {
     margin: 0.35rem 0;
   }
 
   .markdown-content :global(strong) {
-    font-weight: 700;
     color: #f0e6d8;
+    font-weight: 600;
   }
 
   .markdown-content :global(em) {
@@ -1543,6 +1563,11 @@
     opacity: 0.7;
   }
 
+  .markdown-content :global(u) {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
   .markdown-content :global(a) {
     color: #6bb8cc;
     text-decoration: none;
@@ -1552,86 +1577,81 @@
     text-decoration: underline;
   }
 
-  .markdown-content :global(.md-image) {
+  .markdown-content :global(code) {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.85em;
+    color: #e8c36b;
+    word-break: break-word;
+  }
+
+  .markdown-content :global(pre) {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 1rem 0;
+    border: 1px solid #3d3428;
+  }
+
+  .markdown-content :global(pre code) {
+    background: none;
+    padding: 0;
+    font-size: 0.85rem;
+    color: #c4b8a4;
+  }
+
+  .markdown-content :global(blockquote) {
+    margin: 1rem 0;
+    padding: 0.75rem 1rem;
+    border-left: 3px solid #d4a44c;
+    background: rgba(212, 164, 76, 0.1);
+    color: #e8c36b;
+  }
+
+  .markdown-content :global(blockquote p) {
+    margin: 0;
+  }
+
+  .markdown-content :global(hr) {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #4a3f32 20%, #4a3f32 80%, transparent);
+    margin: 1.5rem 0;
+  }
+
+  .markdown-content :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.85rem;
+  }
+
+  .markdown-content :global(th),
+  .markdown-content :global(td) {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #3d3428;
+    text-align: left;
+  }
+
+  .markdown-content :global(th) {
+    background: rgba(0, 0, 0, 0.2);
+    color: #f5d898;
+    font-weight: 600;
+  }
+
+  .markdown-content :global(tr:nth-child(even)) {
+    background: rgba(0, 0, 0, 0.1);
+  }
+
+  .markdown-content :global(img) {
     max-width: 100%;
     height: auto;
     border-radius: 6px;
     margin: 0.5rem 0;
     border: 1px solid #3d3428;
-    /* Performance: Isolate image rendering */
-    contain: layout style paint;
-    content-visibility: auto;
-  }
-
-  .markdown-content :global(.md-image-small) {
-    max-width: 25%;
-  }
-
-  .markdown-content :global(.md-image-medium) {
-    max-width: 50%;
-  }
-
-  .markdown-content :global(.md-image-large) {
-    max-width: 75%;
-  }
-
-  .markdown-content :global(.code-block) {
-    display: block;
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid #3d3428;
-    border-radius: 4px;
-    padding: 0.75rem 1rem;
-    margin: 0.5rem 0;
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 0.85rem;
-    color: #d4d4d4;
-    overflow-x: auto;
-    white-space: pre;
-  }
-
-  .markdown-content :global(.inline-code) {
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid #3d3428;
-    border-radius: 3px;
-    padding: 0.1rem 0.4rem;
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 0.85em;
-    color: #e8c36b;
-  }
-
-  .markdown-content :global(.md-quote) {
-    border-left: 3px solid #d4a44c;
-    padding-left: 1rem;
-    margin: 0.5rem 0;
-    color: #a89880;
-    font-style: italic;
-  }
-
-  .markdown-content :global(li.md-bullet),
-  .markdown-content :global(li.md-numbered) {
-    display: list-item;
-    margin-left: 1.5rem;
-    padding: 0.1rem 0;
-  }
-
-  .markdown-content :global(li.md-bullet) {
-    list-style-type: disc;
-  }
-
-  .markdown-content :global(li.md-numbered) {
-    list-style-type: decimal;
-  }
-
-  .markdown-content :global(u) {
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-
-  .markdown-content :global(.md-divider) {
-    border: none;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, #4a3f32 20%, #4a3f32 80%, transparent);
-    margin: 1.5rem 0;
   }
 
   .error-message {
