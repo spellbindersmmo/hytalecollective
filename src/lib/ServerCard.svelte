@@ -6,13 +6,20 @@
     players = 0,
     maxPlayers = 100,
     tags = [],
-    online = true,
+    status = 'online', // 'online', 'offline', or 'pending'
+    online = null, // deprecated, use status instead
     icon = null,
     banner = null,
     source = 'community',
     votes = 0,
     onclick = null
   } = $props()
+
+  // Handle both old 'online' boolean prop and new 'status' string prop
+  const serverStatus = $derived(
+    status === 'pending' ? 'pending' :
+    status === 'online' || online === true ? 'online' : 'offline'
+  )
 
   // Source badge configuration
   const sourceConfig = {
@@ -47,7 +54,7 @@
             {#if icon}
               <img src={icon} alt="{name} icon" class="server-icon" />
             {:else}
-              <span class="status-dot" class:online></span>
+              <span class="status-dot" class:online={serverStatus === 'online'} class:pending={serverStatus === 'pending'}></span>
             {/if}
             <h3 class="server-name">{name}</h3>
           </div>
@@ -73,12 +80,16 @@
 
         <div class="server-stats">
           <div class="stat-row">
-            <span class="status-indicator" class:online></span>
-            <span class="player-count" class:online>
-              {players}/{maxPlayers}
+            <span class="status-indicator" class:online={serverStatus === 'online'} class:pending={serverStatus === 'pending'}></span>
+            <span class="player-count" class:online={serverStatus === 'online'} class:pending={serverStatus === 'pending'}>
+              {#if serverStatus === 'pending'}
+                N/A
+              {:else}
+                {players}/{maxPlayers}
+              {/if}
             </span>
           </div>
-          <div class="player-label">players</div>
+          <div class="player-label">{serverStatus === 'pending' ? 'no query plugin' : 'players'}</div>
 
           {#if votes > 0}
             <div class="votes">
@@ -231,6 +242,13 @@
       inset 0 1px 2px rgba(255, 255, 255, 0.2);
   }
 
+  .status-dot.pending {
+    background: radial-gradient(circle at 30% 30%, #e8c36b, #d4a44c);
+    box-shadow:
+      0 0 8px #d4a44c,
+      inset 0 1px 2px rgba(255, 255, 255, 0.2);
+  }
+
   .server-name {
     font-family: 'Cinzel', serif;
     font-size: 1rem;
@@ -314,6 +332,10 @@
     background: #7ec47b;
   }
 
+  .status-indicator.pending {
+    background: #d4a44c;
+  }
+
   .player-count {
     font-family: 'Cinzel', serif;
     font-size: 1.1rem;
@@ -324,6 +346,10 @@
 
   .player-count.online {
     color: #6bb8cc;
+  }
+
+  .player-count.pending {
+    color: #d4a44c;
   }
 
   .player-label {

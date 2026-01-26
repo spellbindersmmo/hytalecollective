@@ -5,6 +5,7 @@
   import Panel from './Panel.svelte'
   import Button from './Button.svelte'
   import BuildCard from './BuildCard.svelte'
+  import ServerCard from './ServerCard.svelte'
   import { auth } from './stores/auth.svelte.js'
   import { supabase, getStorageUrl } from './supabase.js'
 
@@ -12,8 +13,9 @@
 
   let profile = $state(null)
   let builds = $state([])
+  let servers = $state([])
   let forumPosts = $state([])
-  let stats = $state({ builds: 0, downloads: 0, posts: 0, points: 0 })
+  let stats = $state({ builds: 0, downloads: 0, posts: 0, servers: 0, points: 0 })
   let loading = $state(true)
   let activeTab = $state('builds')
   let isOwnProfile = $derived(auth.profile?.username === username)
@@ -52,6 +54,24 @@
         ...build,
         thumbnail: getStorageUrl('thumbnails', build.thumbnail_path),
         tags: build.tags?.map(t => t.tag.name) || []
+      }))
+
+      // Fetch user's servers
+      const { data: serversData, count: serversCount } = await supabase
+        .from('servers')
+        .select(`
+          *,
+          tags:server_tags(tag:tags(name, slug))
+        `, { count: 'exact' })
+        .eq('owner_id', profile.id)
+        .order('created_at', { ascending: false })
+        .limit(6)
+
+      servers = (serversData || []).map(server => ({
+        ...server,
+        icon: server.icon_path ? getStorageUrl('server-icons', server.icon_path) : null,
+        banner: server.banner_path ? getStorageUrl('server-banners', server.banner_path) : null,
+        tags: server.tags?.map(t => t.tag.name) || []
       }))
 
       // Fetch forum posts
@@ -105,6 +125,7 @@
         builds: buildsCount || 0,
         downloads: totalDownloads,
         posts: postsCount || 0,
+        servers: serversCount || 0,
         points
       }
 
@@ -240,6 +261,10 @@
                 <span class="stat-label">Builds</span>
               </div>
               <div class="stat">
+                <span class="stat-value">{stats.servers}</span>
+                <span class="stat-label">Servers</span>
+              </div>
+              <div class="stat">
                 <span class="stat-value">{stats.downloads}</span>
                 <span class="stat-label">Downloads</span>
               </div>
@@ -259,6 +284,13 @@
             onclick={() => activeTab = 'builds'}
           >
             Builds ({stats.builds})
+          </button>
+          <button
+            class="tab"
+            class:active={activeTab === 'servers'}
+            onclick={() => activeTab = 'servers'}
+          >
+            Servers ({stats.servers})
           </button>
           <button
             class="tab"
@@ -300,6 +332,46 @@
                 <div class="view-all">
                   <Button variant="secondary" onclick={() => onnavigate(`user-builds-${username}`)}>
                     View All Builds
+                  </Button>
+                </div>
+              {/if}
+            {/if}
+          {:else if activeTab === 'servers'}
+            {#if servers.length === 0}
+              <Panel>
+                <div class="empty-state">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+                    <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                    <line x1="6" y1="6" x2="6.01" y2="6" />
+                    <line x1="6" y1="18" x2="6.01" y2="18" />
+                  </svg>
+                  <p>No servers added yet.</p>
+                </div>
+              </Panel>
+            {:else}
+              <div class="servers-grid">
+                {#each servers as server}
+                  <ServerCard
+                    name={server.name}
+                    slug={server.slug}
+                    description={server.description}
+                    players={server.players || 0}
+                    maxPlayers={server.max_players || 100}
+                    tags={server.tags}
+                    status={server.status}
+                    icon={server.icon}
+                    banner={server.banner}
+                    source={server.source}
+                    votes={server.votes || 0}
+                    onclick={() => onnavigate(`server-${server.slug}`)}
+                  />
+                {/each}
+              </div>
+              {#if stats.servers > 6}
+                <div class="view-all">
+                  <Button variant="secondary" onclick={() => onnavigate(`user-servers-${username}`)}>
+                    View All Servers
                   </Button>
                 </div>
               {/if}
@@ -561,7 +633,7 @@
 
   .stats-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 0.5rem;
     padding: 1rem;
     background: rgba(0, 0, 0, 0.2);
@@ -643,6 +715,18 @@
   @media (min-width: 1024px) {
     .content-grid {
       grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .servers-grid {
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
+    gap: 1.5rem;
+  }
+
+  @media (min-width: 768px) {
+    .servers-grid {
+      grid-template-columns: repeat(2, 1fr);
     }
   }
 

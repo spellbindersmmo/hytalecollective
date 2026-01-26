@@ -257,10 +257,10 @@
                   >
                     <ForumPost
                       title={post.title}
-                      author={post.author?.username || 'Unknown'}
+                      author={post.author}
                       category={post.category}
-                      replies={post.reply_count}
-                      views={post.view_count}
+                      replies={post.replies}
+                      views={post.views}
                       lastActivity={post.lastActivity}
                     />
                   </button>

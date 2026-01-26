@@ -114,7 +114,7 @@
         discord_invite: discordInvite.trim() || null,
         banner_url: bannerPath,
         icon_url: iconPath,
-        status: 'offline' // Will be updated when pinged
+        status: 'pending' // Will be updated when pinged, or stay pending if unreachable
       })
 
       // Add tags if selected
@@ -154,6 +154,60 @@
       <div class="page-header">
         <h1 class="page-title">Add Your Server</h1>
         <p class="page-subtitle">Submit your server to the community directory</p>
+      </div>
+
+      <div class="info-banner">
+        <div class="info-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="16" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12.01" y2="8" />
+          </svg>
+        </div>
+        <div class="info-content">
+          <p class="info-title">Want to display player count and server status?</p>
+          <p class="info-text">
+            Install the <strong>HyQuery</strong> plugin on your server. Without it, your server will be listed but status will show as N/A.
+          </p>
+
+          <details class="plugin-setup">
+            <summary>How to set up the query plugin</summary>
+            <div class="plugin-setup-content">
+              <div class="setup-step">
+                <span class="step-number">1</span>
+                <div class="step-content">
+                  <p><strong>Download the plugin</strong></p>
+                  <a href="/downloads/hyquery.jar" download class="plugin-link">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Download HyQuery.jar
+                  </a>
+                </div>
+              </div>
+
+              <div class="setup-step">
+                <span class="step-number">2</span>
+                <div class="step-content">
+                  <p><strong>Install on your server</strong></p>
+                  <p class="step-desc">Place the <code>hyquery.jar</code> file in your server's <code>plugins</code> folder.</p>
+                </div>
+              </div>
+
+              <div class="setup-step">
+                <span class="step-number">3</span>
+                <div class="step-content">
+                  <p><strong>Restart your server</strong></p>
+                  <p class="step-desc">The plugin will start automatically. Our system will detect your server within a few minutes.</p>
+                </div>
+              </div>
+
+              <p class="setup-note">The plugin uses UDP on your game port, so no additional ports need to be opened.</p>
+            </div>
+          </details>
+        </div>
       </div>
 
       {#if success}
@@ -404,6 +458,160 @@
     font-size: 1rem;
     color: #a89880;
     margin: 0.25rem 0 0 0;
+  }
+
+  /* Info Banner */
+  .info-banner {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: linear-gradient(180deg, rgba(107, 184, 204, 0.1) 0%, rgba(107, 184, 204, 0.05) 100%);
+    border: 1px solid rgba(107, 184, 204, 0.3);
+    border-radius: 6px;
+    margin-bottom: 1.5rem;
+  }
+
+  .info-icon {
+    flex-shrink: 0;
+  }
+
+  .info-icon svg {
+    width: 24px;
+    height: 24px;
+    color: #6bb8cc;
+  }
+
+  .info-content {
+    flex: 1;
+  }
+
+  .info-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #6bb8cc;
+    margin: 0 0 0.35rem 0;
+  }
+
+  .info-text {
+    font-size: 0.85rem;
+    color: #a89880;
+    margin: 0 0 0.75rem 0;
+    line-height: 1.5;
+  }
+
+  .info-text strong {
+    color: #c4b8a4;
+  }
+
+  .plugin-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: linear-gradient(180deg, rgba(107, 184, 204, 0.2) 0%, rgba(107, 184, 204, 0.1) 100%);
+    border: 1px solid rgba(107, 184, 204, 0.4);
+    border-radius: 4px;
+    color: #6bb8cc;
+    font-size: 0.85rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+
+  .plugin-link:hover {
+    background: linear-gradient(180deg, rgba(107, 184, 204, 0.3) 0%, rgba(107, 184, 204, 0.15) 100%);
+    border-color: rgba(107, 184, 204, 0.6);
+  }
+
+  .plugin-link svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .plugin-setup {
+    margin-top: 0.75rem;
+  }
+
+  .plugin-setup summary {
+    font-size: 0.85rem;
+    color: #6bb8cc;
+    cursor: pointer;
+    user-select: none;
+    font-weight: 500;
+  }
+
+  .plugin-setup summary:hover {
+    color: #8dcadb;
+  }
+
+  .plugin-setup-content {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+  }
+
+  .setup-step {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .setup-step:last-of-type {
+    margin-bottom: 0;
+  }
+
+  .step-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: rgba(107, 184, 204, 0.2);
+    border: 1px solid rgba(107, 184, 204, 0.4);
+    border-radius: 50%;
+    color: #6bb8cc;
+    font-size: 0.75rem;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .step-content {
+    flex: 1;
+  }
+
+  .step-content p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #c4b8a4;
+  }
+
+  .step-content .step-desc {
+    margin-top: 0.25rem;
+    font-size: 0.8rem;
+    color: #8a7a6a;
+  }
+
+  .step-content code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+    color: #6bb8cc;
+  }
+
+  .step-content .plugin-link {
+    margin-top: 0.5rem;
+  }
+
+  .setup-note {
+    margin: 1rem 0 0 0;
+    padding: 0.5rem 0.75rem;
+    background: rgba(126, 196, 123, 0.1);
+    border: 1px solid rgba(126, 196, 123, 0.2);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #7ec47b;
   }
 
   /* Form */

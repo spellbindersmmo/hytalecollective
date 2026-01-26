@@ -28,6 +28,12 @@
   let togglingPin = $state(false)
   let showEditPreview = $state(false)
 
+  // Header image editing state
+  let editHeaderImage = $state(null)
+  let editHeaderImagePreview = $state(null)
+  let editHeaderImageInput = $state(null)
+  let removeExistingHeader = $state(false)
+
   // Post reference modal for editing
   let showPostRefModal = $state(false)
   let postRefSearch = $state('')
@@ -468,10 +474,69 @@
     return html
   }
 
+  // Header image edit handlers
+  function handleEditHeaderImageSelect(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
+    if (!allowedTypes.includes(file.type)) {
+      error = 'Header image must be JPEG, PNG, or WebP'
+      return
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      error = 'Header image must be less than 5MB'
+      return
+    }
+
+    editHeaderImage = file
+    editHeaderImagePreview = URL.createObjectURL(file)
+    removeExistingHeader = false
+    error = null
+  }
+
+  function removeEditHeaderImage() {
+    editHeaderImage = null
+    if (editHeaderImagePreview) {
+      URL.revokeObjectURL(editHeaderImagePreview)
+      editHeaderImagePreview = null
+    }
+    if (editHeaderImageInput) editHeaderImageInput.value = ''
+    // Mark that we want to remove the existing header
+    removeExistingHeader = true
+  }
+
+  function keepExistingHeader() {
+    removeExistingHeader = false
+  }
+
+  async function uploadEditHeaderImage() {
+    if (!editHeaderImage) return null
+
+    const ext = editHeaderImage.name.split('.').pop()
+    const timestamp = Date.now()
+    const randomId = Math.random().toString(36).substring(2, 8)
+    const filename = `${auth.user.id}/header-${timestamp}-${randomId}.${ext}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('forum-images')
+      .upload(filename, editHeaderImage, {
+        cacheControl: '3600',
+        upsert: false
+      })
+
+    if (uploadError) throw uploadError
+    return filename
+  }
+
   // Edit functions
   function startEditing() {
     editTitle = post.title
     editContent = post.content
+    editHeaderImage = null
+    editHeaderImagePreview = null
+    removeExistingHeader = false
     editing = true
   }
 
@@ -479,6 +544,12 @@
     editing = false
     editTitle = ''
     editContent = ''
+    editHeaderImage = null
+    if (editHeaderImagePreview) {
+      URL.revokeObjectURL(editHeaderImagePreview)
+      editHeaderImagePreview = null
+    }
+    removeExistingHeader = false
   }
 
   async function saveEdit() {
@@ -488,13 +559,31 @@
     error = null
 
     try {
+      // Handle header image upload/removal for guides
+      let headerImagePath = post.header_image // Keep existing by default
+
+      if (editHeaderImage) {
+        // Upload new header image
+        headerImagePath = await uploadEditHeaderImage()
+      } else if (removeExistingHeader) {
+        // Remove existing header image
+        headerImagePath = null
+      }
+
+      const updateData = {
+        title: editTitle.trim(),
+        content: editContent.trim(),
+        updated_at: new Date().toISOString()
+      }
+
+      // Only update header_image for guides
+      if (isGuide) {
+        updateData.header_image = headerImagePath
+      }
+
       const { error: updateError } = await supabase
         .from('forum_posts')
-        .update({
-          title: editTitle.trim(),
-          content: editContent.trim(),
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', post.id)
 
       if (updateError) throw updateError
@@ -502,6 +591,17 @@
       // Update local state
       post.title = editTitle.trim()
       post.content = editContent.trim()
+      if (isGuide) {
+        post.header_image = headerImagePath
+      }
+
+      // Clean up preview URL
+      if (editHeaderImagePreview) {
+        URL.revokeObjectURL(editHeaderImagePreview)
+        editHeaderImagePreview = null
+      }
+      editHeaderImage = null
+      removeExistingHeader = false
       editing = false
     } catch (e) {
       error = e.message
@@ -697,6 +797,72 @@
               <div class="content-area">
                 {#if editing}
                   <div class="edit-form">
+                    <!-- Header Image for Guides -->
+                    {#if isGuide}
+                      <div class="edit-header-image-section">
+                        <label>Header Image <span class="optional">(optional)</span></label>
+
+                        {#if editHeaderImagePreview}
+                          <!-- New image preview -->
+                          <div class="header-image-preview">
+                            <img src={editHeaderImagePreview} alt="Header preview" />
+                            <div class="header-image-overlay">
+                              <span class="preview-title">{editTitle || 'Your Guide Title'}</span>
+                            </div>
+                            <button type="button" class="remove-header-btn" onclick={removeEditHeaderImage}>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18" />
+                                <line x1="6" y1="6" x2="18" y2="18" />
+                              </svg>
+                            </button>
+                          </div>
+                        {:else if headerImageUrl && !removeExistingHeader}
+                          <!-- Existing image -->
+                          <div class="header-image-preview">
+                            <img src={headerImageUrl} alt="Current header" />
+                            <div class="header-image-overlay">
+                              <span class="preview-title">{editTitle || post.title}</span>
+                            </div>
+                            <button type="button" class="remove-header-btn" onclick={removeEditHeaderImage} title="Remove header image">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18" />
+                                <line x1="6" y1="6" x2="18" y2="18" />
+                              </svg>
+                            </button>
+                            <button type="button" class="change-header-btn" onclick={() => editHeaderImageInput?.click()} title="Change header image">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                              </svg>
+                            </button>
+                          </div>
+                        {:else}
+                          <!-- No image / Upload button -->
+                          <button
+                            type="button"
+                            class="header-image-upload"
+                            onclick={() => editHeaderImageInput?.click()}
+                            disabled={saving}
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                              <circle cx="8.5" cy="8.5" r="1.5" />
+                              <polyline points="21 15 16 10 5 21" />
+                            </svg>
+                            <span>Click to add header image</span>
+                            <small>Recommended: 1200x400px, max 5MB</small>
+                          </button>
+                        {/if}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          class="hidden-file-input"
+                          bind:this={editHeaderImageInput}
+                          onchange={handleEditHeaderImageSelect}
+                        />
+                      </div>
+                    {/if}
+
                     <!-- Formatting Toolbar -->
                     <div class="editor-toolbar">
                       <div class="toolbar-group">
@@ -1284,6 +1450,142 @@
     gap: 0.75rem;
   }
 
+  /* Header image editing styles */
+  .edit-header-image-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .edit-header-image-section label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #c4b8a4;
+  }
+
+  .edit-header-image-section .optional {
+    font-weight: 400;
+    color: #8a7f6d;
+    font-size: 0.8rem;
+  }
+
+  .header-image-preview {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 21 / 9;
+    max-height: 200px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #4a3f32;
+  }
+
+  .header-image-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .header-image-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, transparent 60%);
+    display: flex;
+    align-items: flex-end;
+    padding: 1rem;
+  }
+
+  .header-image-overlay .preview-title {
+    font-family: 'Cinzel', serif;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #fff;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  }
+
+  .remove-header-btn,
+  .change-header-btn {
+    position: absolute;
+    top: 0.5rem;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+
+  .remove-header-btn {
+    right: 0.5rem;
+  }
+
+  .change-header-btn {
+    right: 3rem;
+  }
+
+  .remove-header-btn:hover {
+    background: rgba(196, 107, 107, 0.9);
+  }
+
+  .change-header-btn:hover {
+    background: rgba(212, 164, 76, 0.9);
+  }
+
+  .remove-header-btn svg,
+  .change-header-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .header-image-upload {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 2rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 2px dashed #4a3f32;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: #8a7f6d;
+  }
+
+  .header-image-upload:hover {
+    border-color: #d4a44c;
+    background: rgba(212, 164, 76, 0.05);
+    color: #c4b8a4;
+  }
+
+  .header-image-upload:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .header-image-upload svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  .header-image-upload span {
+    font-size: 0.9rem;
+  }
+
+  .header-image-upload small {
+    font-size: 0.75rem;
+    opacity: 0.7;
+  }
+
+  .hidden-file-input {
+    display: none;
+  }
+
   .category-badge {
     display: inline-block;
     padding: 0.25rem 0.5rem;
@@ -1852,7 +2154,8 @@
   .guide-header {
     position: relative;
     width: 100%;
-    height: 280px;
+    aspect-ratio: 21 / 9;
+    max-height: 400px;
     border-radius: 12px;
     overflow: hidden;
     margin-bottom: 1.5rem;
@@ -1862,6 +2165,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: center center;
   }
 
   .guide-header-overlay {
@@ -1928,7 +2232,8 @@
 
   @media (max-width: 640px) {
     .guide-header {
-      height: 220px;
+      aspect-ratio: 16 / 9;
+      max-height: 280px;
       border-radius: 8px;
     }
 
