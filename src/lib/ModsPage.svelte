@@ -87,12 +87,22 @@
             // Only show local mods
             allMods = localResult.mods
           } else {
-            // Merge with Modtale mods - local mods first on page 0
-            if (currentPage === 0) {
-              allMods = [...localResult.mods, ...allMods]
-            } else {
-              allMods = [...allMods]
+            // Merge with Modtale mods and sort together
+            allMods = [...localResult.mods, ...allMods]
+
+            // Sort combined results based on current sort
+            if (sortBy === 'downloads') {
+              allMods.sort((a, b) => Number(b.downloads || 0) - Number(a.downloads || 0))
+            } else if (sortBy === 'newest') {
+              allMods.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+            } else if (sortBy === 'updated') {
+              allMods.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+            } else if (sortBy === 'title') {
+              allMods.sort((a, b) => (a.title || '').localeCompare(b.title || ''))
             }
+
+            // Limit to page size after sorting
+            allMods = allMods.slice(0, pageSize)
           }
         } catch (e) {
           console.error('Error loading local mods:', e)
