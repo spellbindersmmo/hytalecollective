@@ -285,7 +285,54 @@
     }
   }
 
-  onMount(() => {
+  onMount(async () => {
+    // Check if this is an OAuth callback - if so, let Supabase process the tokens first
+    const isAuthCallback = window.location.pathname === '/auth/callback' ||
+                           window.location.hash.includes('access_token')
+
+    if (isAuthCallback) {
+      // Initialize auth first to process OAuth tokens from URL
+      // Supabase needs the hash fragment before we modify the URL
+      await auth.initialize()
+
+      // After auth processes the tokens, redirect to home
+      window.history.replaceState({ page: 'home' }, '', '/')
+      currentPage = 'home'
+
+      // Fetch app data (auth already initialized)
+      loading = true
+      connectionFailed = false
+      error = null
+
+      try {
+        const results = await Promise.all([
+          fetchWithRetry('Builds', () => fetchFeaturedBuilds(4), [], 2, 20000),
+          fetchWithRetry('Mods', () => searchProjects({ size: 4, sort: 'downloads' }), { projects: [] }, 2, 20000),
+          fetchWithRetry('Servers', () => fetchFeaturedServers(4), [], 2, 20000),
+          fetchWithRetry('Posts', () => fetchRecentPosts(5), [], 2, 20000)
+        ])
+
+        const [buildsResult, modsResult, serversResult, postsResult] = results
+        const allFailed = results.every(r => r.failed)
+
+        if (allFailed) {
+          connectionFailed = true
+        } else {
+          featuredBuilds = buildsResult.data
+          popularMods = modsResult.data.projects || []
+          featuredServers = serversResult.data
+          recentPosts = postsResult.data
+        }
+      } catch (e) {
+        console.error('Error fetching data:', e)
+        connectionFailed = true
+      } finally {
+        loading = false
+      }
+      return
+    }
+
+    // Normal page load (not OAuth callback)
     // Parse initial URL and set page state
     let initialPage = urlToPage(window.location.pathname)
 
