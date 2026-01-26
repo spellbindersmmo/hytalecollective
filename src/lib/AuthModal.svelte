@@ -4,10 +4,18 @@
 
   let {
     open = false,
+    initialMode = 'login',
     onclose = () => {}
   } = $props()
 
   let mode = $state('login') // 'login' | 'signup'
+
+  // Sync mode with initialMode when modal opens
+  $effect(() => {
+    if (open) {
+      mode = initialMode
+    }
+  })
   let email = $state('')
   let password = $state('')
   let username = $state('')
@@ -46,8 +54,11 @@
         if (password !== confirmPassword) {
           throw new Error('Passwords do not match')
         }
-        if (password.length < 6) {
-          throw new Error('Password must be at least 6 characters')
+        if (password.length < 8) {
+          throw new Error('Password must be at least 8 characters')
+        }
+        if (!/[A-Z]/.test(password)) {
+          throw new Error('Password must contain at least one uppercase letter')
         }
         if (username.length < 3) {
           throw new Error('Username must be at least 3 characters')
@@ -179,9 +190,12 @@
             bind:value={password}
             placeholder="Enter your password"
             required
-            minlength="6"
+            minlength={mode === 'signup' ? 8 : 1}
             disabled={loading}
           />
+          {#if mode === 'signup'}
+            <small class="password-hint">Min 8 characters, at least one uppercase letter</small>
+          {/if}
         </div>
 
         {#if mode === 'signup'}
@@ -416,6 +430,13 @@
 
   .form-group input:disabled {
     opacity: 0.6;
+  }
+
+  .password-hint {
+    display: block;
+    margin-top: 0.4rem;
+    font-size: 0.75rem;
+    color: #8a7a6a;
   }
 
   .error-message {

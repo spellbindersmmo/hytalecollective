@@ -4,16 +4,18 @@
     variant = 'primary',
     class: className = '',
     onclick = null,
-    href = null
+    href = null,
+    disabled = false,
+    type = 'button'
   } = $props()
 </script>
 
 {#if href}
-  <a {href} class="btn btn-{variant} {className}">
+  <a {href} class="btn btn-{variant} {className}" class:disabled>
     {@render children()}
   </a>
 {:else}
-  <button {onclick} class="btn btn-{variant} {className}">
+  <button {onclick} class="btn btn-{variant} {className}" {disabled} {type}>
     {@render children()}
   </button>
 {/if}
@@ -89,5 +91,38 @@
     color: #f5d898;
     background: rgba(107, 90, 72, 0.3);
     border-color: #4a3f32;
+  }
+
+  .btn-danger {
+    background: linear-gradient(180deg, #c46b6b 0%, #a04545 50%, #8a3535 100%);
+    border: 2px solid #6b2a2a;
+    color: #fff;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+      0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  .btn-danger:hover {
+    background: linear-gradient(180deg, #d47a7a 0%, #b05555 50%, #9a4545 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.3),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+      0 2px 8px rgba(196, 107, 107, 0.4);
+  }
+
+  .btn-danger:active {
+    transform: translateY(1px);
+    box-shadow:
+      inset 0 2px 4px rgba(0, 0, 0, 0.3),
+      0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .btn:disabled,
+  .btn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 </style>

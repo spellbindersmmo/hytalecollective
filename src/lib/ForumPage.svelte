@@ -123,6 +123,10 @@
           <Button variant="primary" onclick={() => onnavigate('forum-new-post')}>
             New Post
           </Button>
+        {:else}
+          <Button variant="secondary" onclick={() => auth.openModal()}>
+            Login to Post
+          </Button>
         {/if}
       </div>
 

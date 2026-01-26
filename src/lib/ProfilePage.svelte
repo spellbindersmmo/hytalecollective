@@ -179,10 +179,13 @@
           <div class="profile-header">
             <div class="avatar-section">
               <div class="avatar">
-                {#if profile.avatar_url}
-                  <img src={profile.avatar_url} alt={profile.username} />
-                {:else}
-                  <span>{profile.username.charAt(0).toUpperCase()}</span>
+                <span class="avatar-fallback">{profile.username.charAt(0).toUpperCase()}</span>
+                {#if profile.avatar_url && profile.avatar_url.startsWith('http')}
+                  <img
+                    src={profile.avatar_url}
+                    alt={profile.username}
+                    onerror={(e) => e.target.style.display = 'none'}
+                  />
                 {/if}
               </div>
               {#if profile.is_verified}
@@ -482,6 +485,7 @@
   }
 
   .avatar {
+    position: relative;
     width: 120px;
     height: 120px;
     border-radius: 12px;
@@ -495,11 +499,15 @@
   }
 
   .avatar img {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
   }
 
+  .avatar-fallback,
   .avatar span {
     font-family: 'Cinzel', serif;
     font-size: 3rem;

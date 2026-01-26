@@ -406,7 +406,7 @@
                     class="author-link"
                     onclick={() => onnavigate(`profile-${build.author.username}`)}
                   >
-                    {#if build.author.avatar_url}
+                    {#if build.author.avatar_url?.startsWith('http')}
                       <img src={build.author.avatar_url} alt={build.author.username} class="author-avatar" />
                     {:else}
                       <div class="author-avatar-placeholder">
@@ -590,7 +590,7 @@
                     class="author-card"
                     onclick={() => onnavigate(`profile-${build.author.username}`)}
                   >
-                    {#if build.author.avatar_url}
+                    {#if build.author.avatar_url?.startsWith('http')}
                       <img src={build.author.avatar_url} alt={build.author.username} class="author-avatar-large" />
                     {:else}
                       <div class="author-avatar-large-placeholder">

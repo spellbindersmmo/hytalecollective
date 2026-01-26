@@ -339,7 +339,7 @@
                     {#each users as user}
                       <tr>
                         <td>
-                          {#if user.avatar_url}
+                          {#if user.avatar_url?.startsWith('http')}
                             <img src={user.avatar_url} alt="" class="avatar" />
                           {:else}
                             <div class="avatar-placeholder">{user.username?.charAt(0).toUpperCase() || '?'}</div>

@@ -1,6 +1,7 @@
 <script>
   import Button from './Button.svelte'
   import AuthModal from './AuthModal.svelte'
+  import UsernameSetupModal from './UsernameSetupModal.svelte'
   import { auth } from './stores/auth.svelte.js'
 
   let { currentPage = 'home', onnavigate = () => {} } = $props()
@@ -14,11 +15,10 @@
   ]
 
   let mobileMenuOpen = $state(false)
-  let authModalOpen = $state(false)
   let userMenuOpen = $state(false)
 
-  function openAuthModal() {
-    authModalOpen = true
+  function openAuthModal(mode = 'login') {
+    auth.openModal(mode)
     mobileMenuOpen = false
   }
 
@@ -31,7 +31,11 @@
   }
 
   async function handleSignOut() {
-    await auth.signOut()
+    try {
+      await auth.signOut()
+    } catch (e) {
+      console.error('Sign out error:', e)
+    }
     userMenuOpen = false
     mobileMenuOpen = false
     onnavigate('home')
@@ -91,13 +95,19 @@
       {#if auth.isAuthenticated}
         <div class="user-menu-container">
           <button class="user-menu-btn" onclick={toggleUserMenu}>
-            {#if auth.profile?.avatar_url}
-              <img src={auth.profile.avatar_url} alt="" class="user-avatar" />
-            {:else}
+            <div class="user-avatar-wrapper">
               <div class="user-avatar-placeholder">
                 {auth.profile?.username?.charAt(0).toUpperCase() || '?'}
               </div>
-            {/if}
+              {#if auth.profile?.avatar_url && auth.profile.avatar_url.startsWith('http')}
+                <img
+                  src={auth.profile.avatar_url}
+                  alt=""
+                  class="user-avatar"
+                  onerror={(e) => e.target.style.display = 'none'}
+                />
+              {/if}
+            </div>
             <span class="user-name">{auth.profile?.username || 'User'}</span>
             <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M6 9l6 6 6-6" />
@@ -141,8 +151,8 @@
           {/if}
         </div>
       {:else}
-        <Button variant="ghost" onclick={openAuthModal}>Log In</Button>
-        <Button variant="primary" onclick={openAuthModal}>Sign Up</Button>
+        <Button variant="ghost" onclick={() => openAuthModal('login')}>Log In</Button>
+        <Button variant="primary" onclick={() => openAuthModal('signup')}>Sign Up</Button>
       {/if}
     </div>
 
@@ -183,8 +193,8 @@
           {/if}
           <button class="mobile-link logout" onclick={handleSignOut}>Sign Out</button>
         {:else}
-          <Button variant="ghost" onclick={openAuthModal}>Log In</Button>
-          <Button variant="primary" onclick={openAuthModal}>Sign Up</Button>
+          <Button variant="ghost" onclick={() => openAuthModal('login')}>Log In</Button>
+          <Button variant="primary" onclick={() => openAuthModal('signup')}>Sign Up</Button>
         {/if}
       </div>
     </div>
@@ -193,7 +203,11 @@
   <div class="navbar-border"></div>
 </nav>
 
-<AuthModal bind:open={authModalOpen} onclose={() => authModalOpen = false} />
+<AuthModal open={auth.modalOpen} initialMode={auth.modalMode} onclose={() => auth.closeModal()} />
+<UsernameSetupModal
+  open={auth.isAuthenticated && auth.needsUsernameSetup}
+  onclose={() => auth.fetchProfile()}
+/>
 
 <style>
   .navbar {
@@ -460,7 +474,16 @@
     color: #f0e6d8;
   }
 
+  .user-avatar-wrapper {
+    position: relative;
+    width: 28px;
+    height: 28px;
+  }
+
   .user-avatar {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 28px;
     height: 28px;
     border-radius: 50%;
