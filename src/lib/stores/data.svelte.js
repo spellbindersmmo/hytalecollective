@@ -1,4 +1,5 @@
 import { supabase, getStorageUrl } from '../supabase.js'
+import { getProject as getModtaleProject } from '../modtale.js'
 
 // Helper to handle both external URLs and storage paths
 function resolveImageUrl(bucket, path) {
@@ -296,7 +297,7 @@ export async function fetchFeaturedServers(limit = 4) {
       owner:profiles(username, avatar_url),
       tags:server_tags(tag:tags(name, slug, color))
     `)
-    .eq('status', 'online')
+    .in('status', ['online', 'pending'])
     .order('current_players', { ascending: false })
     .limit(limit)
 
@@ -323,7 +324,12 @@ export async function fetchServers({ page = 1, limit = 20, tag = null, status = 
     .select(selectQuery, { count: 'exact' })
 
   if (status && status !== 'all') {
-    query = query.eq('status', status)
+    // When filtering for 'online', include 'pending' (unverified) servers too
+    if (status === 'online') {
+      query = query.in('status', ['online', 'pending'])
+    } else {
+      query = query.eq('status', status)
+    }
   }
 
   if (tag) {
@@ -612,6 +618,210 @@ export async function recordDownload(contentType, contentId) {
     })
 
   if (error) console.error('Error recording download:', error)
+}
+
+// ============================================
+// FAVORITES
+// ============================================
+
+export async function addFavorite(contentType, contentId) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Must be logged in to save favorites')
+
+  const { data, error } = await supabase
+    .from('favorites')
+    .insert({
+      user_id: user.id,
+      content_type: contentType,
+      content_id: contentId
+    })
+    .select()
+    .single()
+
+  if (error) {
+    if (error.code === '23505') {
+      // Already favorited, not an error
+      return null
+    }
+    throw error
+  }
+
+  return data
+}
+
+export async function removeFavorite(contentType, contentId) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Must be logged in to remove favorites')
+
+  const { error } = await supabase
+    .from('favorites')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('content_type', contentType)
+    .eq('content_id', contentId)
+
+  if (error) throw error
+}
+
+export async function checkFavorite(contentType, contentId) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return false
+
+  const { data, error } = await supabase
+    .from('favorites')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('content_type', contentType)
+    .eq('content_id', contentId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('Error checking favorite:', error)
+    return false
+  }
+
+  return !!data
+}
+
+export async function fetchUserFavorites() {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { builds: [], mods: [], servers: [] }
+
+  const { data: favorites, error } = await supabase
+    .from('favorites')
+    .select('content_type, content_id, created_at')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('Error fetching favorites:', error)
+    return { builds: [], mods: [], servers: [] }
+  }
+
+  // Group by content type
+  const buildIds = favorites.filter(f => f.content_type === 'build').map(f => f.content_id)
+  const modSlugs = favorites.filter(f => f.content_type === 'mod').map(f => f.content_id)
+  const serverIds = favorites.filter(f => f.content_type === 'server').map(f => f.content_id)
+
+  // Fetch the actual content
+  const [builds, servers] = await Promise.all([
+    buildIds.length > 0 ? supabase
+      .from('builds')
+      .select('id, title, slug, thumbnail_path, author:profiles(username)')
+      .in('id', buildIds)
+      .then(({ data }) => data?.map(b => ({
+        ...b,
+        thumbnail: getStorageUrl('thumbnails', b.thumbnail_path)
+      })) || [])
+    : [],
+    serverIds.length > 0 ? supabase
+      .from('servers')
+      .select('id, name, slug, icon_url, status, current_players, max_players')
+      .in('id', serverIds)
+      .then(({ data }) => data?.map(s => ({
+        ...s,
+        icon: resolveImageUrl('servers', s.icon_url)
+      })) || [])
+    : []
+  ])
+
+  // Fetch mods from Modtale API (external)
+  let mods = []
+  if (modSlugs.length > 0) {
+    const modPromises = modSlugs.map(async (slug) => {
+      try {
+        const mod = await getModtaleProject(slug)
+        return {
+          slug: mod.slug,
+          title: mod.title,
+          thumbnail: mod.thumbnail_url,
+          author: mod.owner?.username || 'Unknown'
+        }
+      } catch (e) {
+        console.error(`Error fetching mod ${slug}:`, e)
+        return null
+      }
+    })
+    mods = (await Promise.all(modPromises)).filter(Boolean)
+  }
+
+  return { builds, mods, servers }
+}
+
+// ============================================
+// COMMENTS
+// ============================================
+
+export async function fetchComments(contentType, contentId) {
+  const { data, error } = await supabase
+    .from('comments')
+    .select(`
+      id, content, created_at, updated_at,
+      author:profiles(id, username, avatar_url)
+    `)
+    .eq('content_type', contentType)
+    .eq('content_id', contentId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    console.error('Error fetching comments:', error)
+    return []
+  }
+
+  return data
+}
+
+export async function addComment(contentType, contentId, content) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Must be logged in to comment')
+
+  const { data, error } = await supabase
+    .from('comments')
+    .insert({
+      user_id: user.id,
+      content_type: contentType,
+      content_id: contentId,
+      content: content.trim()
+    })
+    .select(`
+      id, content, created_at, updated_at,
+      author:profiles(id, username, avatar_url)
+    `)
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function updateComment(commentId, content) {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Must be logged in to edit comment')
+
+  const { data, error } = await supabase
+    .from('comments')
+    .update({
+      content: content.trim(),
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', commentId)
+    .eq('user_id', user.id)
+    .select(`
+      id, content, created_at, updated_at,
+      author:profiles(id, username, avatar_url)
+    `)
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export async function deleteComment(commentId) {
+  const { error } = await supabase
+    .from('comments')
+    .delete()
+    .eq('id', commentId)
+
+  if (error) throw error
 }
 
 // ============================================
