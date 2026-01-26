@@ -21,6 +21,8 @@
   import ServerDetailPage from './lib/ServerDetailPage.svelte'
   import ModsPage from './lib/ModsPage.svelte'
   import ModDetailPage from './lib/ModDetailPage.svelte'
+  import ModUploadPage from './lib/ModUploadPage.svelte'
+  import ModEditPage from './lib/ModEditPage.svelte'
   import BuildsPage from './lib/BuildsPage.svelte'
   import BuildDetailPage from './lib/BuildDetailPage.svelte'
   import AdminPage from './lib/AdminPage.svelte'
@@ -54,6 +56,8 @@
     if (page.startsWith('forum-category-')) return `/forum/category/${page.slice(15)}`
     if (page.startsWith('forum-post-')) return `/forum/post/${page.slice(11)}`
     if (page === 'mods') return '/mods'
+    if (page === 'mod-upload') return '/mods/upload'
+    if (page.startsWith('mod-edit-')) return `/mods/${page.slice(9)}/edit`
     if (page.startsWith('mod-')) return `/mods/${page.slice(4)}`
     if (page === 'builds') return '/builds'
     if (page.startsWith('build-')) return `/builds/${page.slice(6)}`
@@ -83,6 +87,8 @@
       return 'forum'
     }
     if (parts[0] === 'mods') {
+      if (parts[1] === 'upload') return 'mod-upload'
+      if (parts[2] === 'edit' && parts[1]) return `mod-edit-${parts[1]}`
       return parts[1] ? `mod-${parts[1]}` : 'mods'
     }
     if (parts[0] === 'builds') {
@@ -114,6 +120,7 @@
     if (page === 'report') return 'auth'
     if (page === 'servers-add') return 'auth'
     if (page === 'forum-new-post' || page.startsWith('forum-new-post-')) return 'auth'
+    if (page.startsWith('mod-edit-')) return 'auth'
 
     // Public
     return 'public'
@@ -135,6 +142,7 @@
   let profileUsername = $derived(getRouteParam(currentPage, 'profile-'))
   let serverSlug = $derived(getRouteParam(currentPage, 'server-'))
   let modSlug = $derived(getRouteParam(currentPage, 'mod-'))
+  let modEditSlug = $derived(getRouteParam(currentPage, 'mod-edit-'))
   let buildSlug = $derived(getRouteParam(currentPage, 'build-'))
 
   // Data fetched from Supabase and APIs
@@ -374,6 +382,10 @@
   <ProfilePage username={profileUsername} onnavigate={navigate} />
 {:else if currentPage === 'settings'}
   <SettingsPage onnavigate={navigate} />
+{:else if currentPage === 'mod-upload'}
+  <ModUploadPage onnavigate={navigate} />
+{:else if modEditSlug}
+  <ModEditPage modSlug={modEditSlug} onnavigate={navigate} />
 {:else if modSlug}
   <ModDetailPage modSlug={modSlug} onnavigate={navigate} />
 {:else if currentPage === 'mods'}
@@ -452,6 +464,42 @@
       </div>
     </section>
 
+    <!-- Popular Mods Section -->
+    <section class="section">
+      <div class="container">
+        <div class="section-panel">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Popular Mods</h2>
+              <p class="section-subtitle">Enhance your game with community mods</p>
+            </div>
+            <Button variant="secondary" onclick={() => navigate('mods')}>View All</Button>
+          </div>
+
+          <div class="mod-grid">
+            {#if loading}
+              {#each Array(4) as _}
+                <div class="skeleton-card mod-skeleton"></div>
+              {/each}
+            {:else if popularMods.length === 0}
+              <p class="empty-message">No mods available</p>
+            {:else}
+              {#each popularMods as mod}
+                <ModCard
+                  title={mod.title}
+                  author={mod.author}
+                  iconUrl={mod.iconUrl}
+                  classification={mod.classification}
+                  downloads={mod.downloads}
+                  onclick={() => navigate(`mod-${mod.slug || mod.id}`)}
+                />
+              {/each}
+            {/if}
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Featured Builds Section -->
     <section class="section">
       <div class="container">
@@ -482,42 +530,6 @@
                   downloads={build.download_count}
                   blocks={build.block_count}
                   votes={build.total_votes}
-                />
-              {/each}
-            {/if}
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Popular Mods Section -->
-    <section class="section">
-      <div class="container">
-        <div class="section-panel">
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Popular Mods</h2>
-              <p class="section-subtitle">Enhance your game with community mods</p>
-            </div>
-            <Button variant="secondary" onclick={() => navigate('mods')}>View All</Button>
-          </div>
-
-          <div class="mod-grid">
-            {#if loading}
-              {#each Array(4) as _}
-                <div class="skeleton-card mod-skeleton"></div>
-              {/each}
-            {:else if popularMods.length === 0}
-              <p class="empty-message">No mods available</p>
-            {:else}
-              {#each popularMods as mod}
-                <ModCard
-                  title={mod.title}
-                  author={mod.author}
-                  iconUrl={mod.iconUrl}
-                  classification={mod.classification}
-                  downloads={mod.downloads}
-                  onclick={() => navigate(`mod-${mod.slug || mod.id}`)}
                 />
               {/each}
             {/if}

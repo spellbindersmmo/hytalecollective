@@ -140,7 +140,8 @@ export function formatDownloads(count) {
 
 // Format rating for display (assuming 0-5 scale)
 export function formatRating(rating) {
-  return rating ? rating.toFixed(1) : 'N/A'
+  if (!rating || rating === 0) return 'No ratings'
+  return rating.toFixed(1)
 }
 
 // Get the Modtale page URL for a project
