@@ -310,7 +310,7 @@
                     class="owner-card"
                     onclick={() => onnavigate(`profile-${server.owner.username}`)}
                   >
-                    {#if server.owner.avatar_url}
+                    {#if server.owner.avatar_url?.startsWith('http')}
                       <img src={server.owner.avatar_url} alt={server.owner.username} class="owner-avatar" />
                     {:else}
                       <div class="owner-avatar-placeholder">

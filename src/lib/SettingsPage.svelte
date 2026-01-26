@@ -27,6 +27,12 @@
   let success = $state(null)
   let activeSection = $state('profile')
 
+  // Delete account state
+  let showDeleteConfirm = $state(false)
+  let deleteConfirmText = $state('')
+  let deleting = $state(false)
+  let deleteError = $state(null)
+
   onMount(() => {
     if (auth.profile) {
       loadProfile()
@@ -124,6 +130,31 @@
     await auth.signOut()
     onnavigate('home')
   }
+
+  async function handleDeleteAccount() {
+    if (deleteConfirmText !== username) {
+      deleteError = 'Please type your username to confirm'
+      return
+    }
+
+    deleting = true
+    deleteError = null
+
+    try {
+      await auth.deleteAccount()
+      onnavigate('home')
+    } catch (e) {
+      console.error('Delete account error:', e)
+      deleteError = e.message || 'Failed to delete account. Please try again.'
+      deleting = false
+    }
+  }
+
+  function cancelDelete() {
+    showDeleteConfirm = false
+    deleteConfirmText = ''
+    deleteError = null
+  }
 </script>
 
 <div class="page">
@@ -182,10 +213,13 @@
                     <label>Profile Picture</label>
                     <div class="avatar-editor">
                       <div class="avatar-preview">
-                        {#if avatarPreview}
-                          <img src={avatarPreview} alt="" />
-                        {:else}
-                          <span>{username.charAt(0).toUpperCase()}</span>
+                        <span class="avatar-fallback">{username.charAt(0).toUpperCase()}</span>
+                        {#if typeof avatarPreview === 'string' && avatarPreview.length > 0 && (avatarPreview.startsWith('http') || avatarPreview.startsWith('data:'))}
+                          <img
+                            src={avatarPreview}
+                            alt=""
+                            onerror={(e) => e.target.style.display = 'none'}
+                          />
                         {/if}
                       </div>
                       <div class="avatar-actions">
@@ -319,6 +353,49 @@
                     <Button variant="secondary" onclick={handleSignOut}>
                       Sign Out
                     </Button>
+                  </div>
+
+                  <div class="danger-zone delete-zone">
+                    <h3>Delete Account</h3>
+                    <p>Permanently delete your account and all associated data. This action cannot be undone.</p>
+
+                    {#if !showDeleteConfirm}
+                      <Button variant="danger" onclick={() => showDeleteConfirm = true}>
+                        Delete Account
+                      </Button>
+                    {:else}
+                      <div class="delete-confirm">
+                        <p class="confirm-warning">
+                          This will permanently delete your account, including all your builds, posts, and other data.
+                        </p>
+                        <label for="deleteConfirm">
+                          Type <strong>{username}</strong> to confirm:
+                        </label>
+                        <input
+                          type="text"
+                          id="deleteConfirm"
+                          bind:value={deleteConfirmText}
+                          placeholder="Enter your username"
+                          disabled={deleting}
+                          autocomplete="off"
+                        />
+                        {#if deleteError}
+                          <p class="delete-error">{deleteError}</p>
+                        {/if}
+                        <div class="delete-actions">
+                          <Button variant="secondary" onclick={cancelDelete} disabled={deleting}>
+                            Cancel
+                          </Button>
+                          <Button
+                            variant="danger"
+                            onclick={handleDeleteAccount}
+                            disabled={deleting || deleteConfirmText !== username}
+                          >
+                            {deleting ? 'Deleting...' : 'Permanently Delete'}
+                          </Button>
+                        </div>
+                      </div>
+                    {/if}
                   </div>
                 </div>
               </Panel>
@@ -524,6 +601,7 @@
   }
 
   .avatar-preview {
+    position: relative;
     width: 80px;
     height: 80px;
     border-radius: 10px;
@@ -536,12 +614,16 @@
   }
 
   .avatar-preview img {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
   }
 
-  .avatar-preview span {
+  .avatar-preview span,
+  .avatar-preview .avatar-fallback {
     font-family: 'Cinzel', serif;
     font-size: 2rem;
     font-weight: 700;
@@ -640,5 +722,65 @@
     font-size: 0.9rem;
     color: #8a7a6a;
     margin: 0 0 1rem 0;
+  }
+
+  .delete-zone {
+    border-top-color: #5c3a3a;
+  }
+
+  .delete-zone h3 {
+    color: #c46b6b;
+  }
+
+  .delete-confirm {
+    background: rgba(196, 107, 107, 0.1);
+    border: 1px solid rgba(196, 107, 107, 0.3);
+    border-radius: 6px;
+    padding: 1rem;
+  }
+
+  .delete-confirm .confirm-warning {
+    color: #e8a0a0;
+    font-weight: 500;
+    margin-bottom: 1rem;
+  }
+
+  .delete-confirm label {
+    display: block;
+    font-size: 0.85rem;
+    color: #c4b8a4;
+    margin-bottom: 0.5rem;
+  }
+
+  .delete-confirm label strong {
+    color: #f0e6d8;
+  }
+
+  .delete-confirm input {
+    width: 100%;
+    padding: 0.75rem;
+    background: linear-gradient(180deg, #1a1714 0%, #141210 100%);
+    border: 1px solid #5c3a3a;
+    border-radius: 6px;
+    color: #f0e6d8;
+    font-size: 0.95rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .delete-confirm input:focus {
+    outline: none;
+    border-color: #c46b6b;
+  }
+
+  .delete-error {
+    color: #e8a0a0;
+    font-size: 0.85rem;
+    margin: 0 0 0.75rem 0;
+  }
+
+  .delete-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
   }
 </style>

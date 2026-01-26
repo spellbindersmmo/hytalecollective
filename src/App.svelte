@@ -569,7 +569,7 @@
                 Join thousands of builders and adventurers. Upload your builds, share your worlds, and become part of the community.
               </p>
               <div class="cta-buttons">
-                <Button variant="primary" onclick={() => auth.openModal()}>Create Account</Button>
+                <Button variant="primary" onclick={() => auth.openModal('signup')}>Create Account</Button>
                 <Button variant="secondary">Learn More</Button>
               </div>
             </div>

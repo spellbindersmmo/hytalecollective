@@ -782,7 +782,7 @@
             <div class="post-body">
               <aside class="author-card">
                 <div class="avatar">
-                  {#if post.author.avatar_url}
+                  {#if post.author.avatar_url?.startsWith('http')}
                     <img src={post.author.avatar_url} alt="" decoding="async" />
                   {:else}
                     <span>{post.author.username.charAt(0).toUpperCase()}</span>
@@ -1040,7 +1040,7 @@
                 <div class="reply">
                   <aside class="author-card compact">
                     <div class="avatar small">
-                      {#if reply.author.avatar_url}
+                      {#if reply.author.avatar_url?.startsWith('http')}
                         <img src={reply.author.avatar_url} alt="" loading="lazy" decoding="async" />
                       {:else}
                         <span>{reply.author.username.charAt(0).toUpperCase()}</span>

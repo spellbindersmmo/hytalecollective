@@ -5,6 +5,8 @@ let user = $state(null)
 let profile = $state(null)
 let loading = $state(true)
 let currentSessionExpiresAt = $state(null)
+let authModalOpen = $state(false)
+let authModalMode = $state('login') // 'login' | 'signup'
 
 // Track the auth subscription for cleanup
 let authSubscription = null
@@ -220,12 +222,30 @@ async function signInWithProvider(provider) {
 
 // Sign out
 async function signOut() {
-  const { error } = await supabase.auth.signOut()
-  if (error) throw error
+  // Try Supabase signOut
+  try {
+    await supabase.auth.signOut({ scope: 'local' })
+  } catch (e) {
+    // Ignore - we'll manually clear storage below
+  }
 
+  // Manually clear Supabase storage as fallback
+  if (typeof localStorage !== 'undefined') {
+    const keysToRemove = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && (key.includes('supabase') || key.includes('sb-'))) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key))
+  }
+
+  // Clear our local state
   user = null
   profile = null
   currentSessionExpiresAt = null
+  authModalOpen = false
 }
 
 // Manually refresh the session - useful for recovering from edge cases
@@ -276,6 +296,61 @@ async function updateProfile(updates) {
   return data
 }
 
+// Modal controls
+function openModal(mode = 'login') {
+  authModalMode = mode
+  authModalOpen = true
+}
+
+function closeModal() {
+  authModalOpen = false
+}
+
+// Delete user account
+async function deleteAccount() {
+  if (!user) throw new Error('Not authenticated')
+
+  // Call the database function to delete the account
+  const { error } = await supabase.rpc('delete_user_account')
+
+  if (error) throw error
+
+  // Clear local state
+  user = null
+  profile = null
+  currentSessionExpiresAt = null
+  authModalOpen = false
+
+  // Clear Supabase storage
+  if (typeof localStorage !== 'undefined') {
+    const keysToRemove = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && (key.includes('supabase') || key.includes('sb-'))) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key))
+  }
+}
+
+// Check if username needs to be set (auto-generated from OAuth)
+function needsUsernameSetup() {
+  if (!user || !profile) return false
+
+  const username = profile.username
+  if (!username) return true
+
+  // Check if username contains spaces (OAuth full name like "John Smith")
+  if (username.includes(' ')) return true
+
+  // Check if username looks auto-generated (starts with user_ followed by random chars)
+  // This pattern is set by our database trigger for OAuth signups
+  if (/^user_[a-z0-9]+$/i.test(username)) return true
+
+  return false
+}
+
 // Export reactive getters and methods
 export const auth = {
   get user() { return user },
@@ -283,6 +358,9 @@ export const auth = {
   get loading() { return loading },
   get isAuthenticated() { return !!user },
   get isAdmin() { return profile?.role === 'admin' || profile?.is_admin === true },
+  get modalOpen() { return authModalOpen },
+  get modalMode() { return authModalMode },
+  get needsUsernameSetup() { return needsUsernameSetup() },
 
   initialize,
   cleanup,
@@ -292,5 +370,8 @@ export const auth = {
   signIn,
   signInWithProvider,
   signOut,
-  updateProfile
+  updateProfile,
+  deleteAccount,
+  openModal,
+  closeModal
 }
